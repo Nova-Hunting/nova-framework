@@ -50,33 +50,11 @@ rule RuleName
 
 ## Installation
 
-NOVA offers flexible installation options based on your needs:
-
-### Basic Installation (Keywords Only)
-For basic keyword and regex pattern matching:
 ```bash
 pip install nova-hunting
 ```
 
-### Full Installation (Recommended)
-For complete functionality including semantic matching and LLM evaluation:
-```bash
-pip install nova-hunting[llm]
-```
-
-### Development Installation
-For development work with testing and documentation tools:
-```bash
-pip install nova-hunting[dev]
-```
-
-### Installation Options Summary
-- **Basic**: `pip install nova-hunting` - Keywords and regex only (~5MB)
-- **LLM**: `pip install nova-hunting[llm]` - Full functionality (~1GB+ with ML models)
-- **Dev**: `pip install nova-hunting[dev]` - Development tools included
-- **All**: `pip install nova-hunting[all]` - Everything including docs
-
-> **Note**: The basic installation is much lighter (~5MB) and perfect if you only need keyword/regex matching. The LLM installation includes large machine learning models (~1GB+) needed for semantic similarity and LLM evaluation features.
+This includes all features: keyword matching, semantic similarity, and LLM evaluation.
 
 ## Getting Rules
 

@@ -1,36 +1,21 @@
 # NOVA Framework Requirements
-# This file contains all dependencies for development and documentation.
-# For production installations, use setup.py extras instead:
-#
-# Basic installation (keywords only):
-#   pip install nova-hunting
-#
-# Advanced installation (with LLM support):
-#   pip install nova-hunting[llm]
-#
-# Developer installation:
-#   pip install nova-hunting[dev]
-#
-# Full installation (everything):
-#   pip install nova-hunting[all]
+# Install with: pip install nova-hunting
 
-# Using ~= (compatible release) to allow patch updates but prevent breaking changes
-
-# Core dependencies (always installed)
+# Core
 requests~=2.32.5
 pyyaml~=6.0.1
 colorama~=0.4.6
 
-# LLM dependencies (for semantic matching and LLM evaluation)
+# LLM/Semantic
 sentence-transformers~=3.3.1
 transformers~=4.47.0
 openai~=1.12.0
 anthropic~=0.18.1
 
-# Development dependencies
+# Testing
 pytest~=7.4.4
 pytest-cov~=4.1.0
 
-# Documentation dependencies
+# Documentation (optional, for building docs locally)
 mkdocs~=1.5.3
 mkdocs-material~=9.5.9

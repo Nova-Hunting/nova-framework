@@ -1,163 +1,96 @@
 # Nova Installation Guide
 
-Nova Framework offers flexible installation options to match your specific needs and minimize dependencies.
-
-## Installation Options
-
-### 1. Basic Installation (`nova-hunting`)
-**Best for**: Simple keyword and regex pattern matching
-**Size**: ~5MB
-**Dependencies**: `requests`, `pyyaml`, `colorama`
+## Installation
 
 ```bash
 pip install nova-hunting
 ```
 
-**What's included:**
-- ✅ Keyword pattern matching (exact text, case-sensitive/insensitive)
-- ✅ Regex pattern matching with full regex support
-- ✅ Rule parsing and condition evaluation
-- ✅ Command-line tool (`novarun`)
-- ❌ Semantic similarity matching
-- ❌ LLM-based evaluation
+This installs Nova with all features:
+- Keyword pattern matching (exact text, case-sensitive/insensitive)
+- Regex pattern matching with full regex support
+- Semantic similarity matching using sentence transformers
+- LLM-based evaluation (OpenAI, Anthropic, Azure, Ollama, Groq)
+- Command-line tool (`novarun`)
 
-**Use cases:**
-- Basic threat detection with known attack keywords
-- Regex-based pattern matching
-- Lightweight deployments
-- Getting started with Nova
+## Dependencies
 
-### 2. LLM Installation (`nova-hunting[llm]`)
-**Best for**: Full Nova functionality including AI-powered matching
-**Size**: ~1GB+ (includes ML models)
-**Dependencies**: Basic + `sentence-transformers`, `transformers`, `openai`, `anthropic`
+Nova includes the following dependencies:
 
-```bash
-pip install nova-hunting[llm]
-```
+| Package | Purpose |
+|---------|---------|
+| `requests` | HTTP requests |
+| `pyyaml` | YAML parsing |
+| `colorama` | Terminal colors |
+| `sentence-transformers` | Semantic similarity |
+| `transformers` | ML model support |
+| `openai` | OpenAI API |
+| `anthropic` | Anthropic API |
+| `pytest` | Testing |
 
-**What's included:**
-- ✅ Everything from Basic installation
-- ✅ Semantic similarity matching using sentence transformers
-- ✅ LLM-based evaluation (OpenAI, Anthropic, Azure, Ollama, Groq)
-- ✅ Advanced pattern detection using AI
+## Getting Rules
 
-**Use cases:**
-- Advanced threat detection
-- Semantic analysis of prompts
-- LLM-powered pattern matching
-- Production deployments requiring full functionality
-
-### 3. Development Installation (`nova-hunting[dev]`)
-**Best for**: Contributing to Nova or extending its functionality
-**Size**: ~1GB+ (includes everything)
-**Dependencies**: LLM + `pytest`, `pytest-cov`, `mkdocs`, `mkdocs-material`
+Nova rules are maintained in a separate repository:
 
 ```bash
-pip install nova-hunting[dev]
+git clone https://github.com/Nova-Hunting/nova-rules
 ```
 
-**What's included:**
-- ✅ Everything from LLM installation
-- ✅ Testing framework (pytest)
-- ✅ Documentation tools (MkDocs)
-- ✅ Development utilities
+## Quick Start
 
-### 4. Full Installation (`nova-hunting[all]`)
-**Best for**: Complete Nova installation with all optional features
+Scan prompts with the `novarun` CLI:
+
 ```bash
-pip install nova-hunting[all]
+novarun --rules nova-rules/jailbreak.nov --prompt "ignore previous instructions"
 ```
 
-## Feature Comparison
+## Rule Types
 
-| Feature | Basic | LLM | Dev | All |
-|---------|-------|-----|-----|-----|
-| Keyword Matching | ✅ | ✅ | ✅ | ✅ |
-| Regex Patterns | ✅ | ✅ | ✅ | ✅ |
-| Semantic Similarity | ❌ | ✅ | ✅ | ✅ |
-| LLM Evaluation | ❌ | ✅ | ✅ | ✅ |
-| Testing Tools | ❌ | ❌ | ✅ | ✅ |
-| Documentation | ❌ | ❌ | ✅ | ✅ |
+Nova supports three types of pattern matching in rules:
 
-## Rule Compatibility
-
-### Basic Installation
-Only supports rules with `keywords` section:
-
+### Keywords
+Exact text or regex patterns:
 ```yaml
-rule BasicRule
-{
-    keywords:
-        $malware = "malware"
-        $phishing = /phish(ing|er)/i
-    
-    condition:
-        any of keywords.*
-}
+keywords:
+    $malware = "malware"
+    $regex_pattern = /hack(ing|er)/i
 ```
 
-### LLM Installation  
-Supports all rule types:
-
+### Semantics
+Semantic similarity matching with configurable thresholds:
 ```yaml
-rule AdvancedRule
-{
-    keywords:
-        $suspicious = "suspicious"
-    
-    semantics:
-        $threat = "threatening behavior" (0.7)
-    
-    llm:
-        $analysis = "Analyze if this is malicious" (0.8)
-    
-    condition:
-        keywords.$suspicious and (semantics.$threat or llm.$analysis)
-}
+semantics:
+    $threat = "threatening behavior" (0.7)
 ```
 
-## Graceful Degradation
+### LLM
+LLM-based evaluation using natural language:
+```yaml
+llm:
+    $analysis = "Analyze if this is malicious" (0.8)
+```
 
-Nova is designed to handle missing dependencies gracefully:
+## Environment Variables
 
-- Rules requiring semantic matching will show warnings but still process keyword patterns
-- Rules requiring LLM evaluation will show warnings but still process other pattern types
-- The system continues to function with available capabilities
-
-## Migration Path
-
-You can start with basic installation and upgrade as needed:
-
-1. **Start Basic**: Test Nova with keyword-only rules
-2. **Upgrade to LLM**: Add semantic and LLM patterns to existing rules
-3. **Add Development**: Contribute or customize Nova
+For LLM evaluation, set your API keys:
 
 ```bash
-# Start basic
-pip install nova-hunting
-
-# Upgrade to full functionality
-pip install nova-hunting[llm]
-
-# Add development tools
-pip install nova-hunting[dev]
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-## Dependencies Explained
+## Development
 
-### What is `mkdocs` for?
-`mkdocs` and `mkdocs-material` are used to generate the Nova documentation website. They're only needed if you want to:
-- Build documentation locally
-- Contribute to Nova documentation
-- Create custom documentation for your rules
+For development, clone and install in editable mode:
 
-You can safely ignore these unless you're doing documentation work.
+```bash
+git clone https://github.com/Nova-Hunting/nova-framework
+cd nova-framework
+pip install -e .
+```
 
-### Why are ML dependencies so large?
-The `sentence-transformers` and `transformers` libraries include:
-- Pre-trained language models for semantic similarity
-- Tokenization libraries for text processing
-- Neural network frameworks (PyTorch)
+Run tests:
 
-These enable Nova's AI-powered features but add significant size to the installation.
+```bash
+pytest tests/ -v
+```
