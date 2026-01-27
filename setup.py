@@ -3,15 +3,15 @@ from setuptools import setup, find_packages
 # Core dependencies - minimal for basic functionality (keywords, basic parsing)
 # Using ~= (compatible release) to allow patch updates but prevent breaking changes
 core_requirements = [
-    "requests~=2.31.0",
+    "requests~=2.32.5",
     "pyyaml~=6.0.1",
     "colorama~=0.4.6"
 ]
 
 # Advanced LLM dependencies - for semantic matching and LLM evaluation
 llm_requirements = [
-    "sentence-transformers~=2.3.1",
-    "transformers~=4.36.2",
+    "sentence-transformers~=3.3.1",
+    "transformers~=4.47.0",
     "openai~=1.12.0",
     "anthropic~=0.18.1"
 ]
