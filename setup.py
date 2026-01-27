@@ -30,13 +30,13 @@ docs_requirements = [
 
 setup(
     name='nova-hunting',
-    version='0.1.5',  # Updated version to reflect new packaging structure
+    version='0.2.0',  # Breaking change: rules moved to separate nova-rules repository
     author='Thomas Roccia',
     author_email='contact@securitybreak.io',
     description='Prompt Pattern Matching Framework for Generative AI',
     long_description=open('README.md', encoding='utf-8').read(),
     long_description_content_type='text/markdown',
-    url='https://github.com/fr0gger/nova-framework',
+    url='https://github.com/Nova-Hunting/nova-framework',
     packages=find_packages(exclude=["tests*", "nova_doc*", "*.pyc"]),
     install_requires=core_requirements,
     extras_require={
@@ -46,7 +46,6 @@ setup(
         'all': llm_requirements + dev_requirements + docs_requirements
     },
     include_package_data=True,
-    package_data={'nova': ['nova_rules/*.nov']},
     entry_points={
         'console_scripts': [
             'novarun=nova.novarun:main',
