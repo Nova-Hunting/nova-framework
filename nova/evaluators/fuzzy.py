@@ -1,6 +1,6 @@
 import re
 from typing import Dict, Union
-from nova.core.rules import FuzzyPattern
+from nova.core.rules import KeywordPattern
 from nova.evaluators.base import FuzzyEvaluator
 from nova.utils.logger import get_logger
 try:
@@ -22,7 +22,7 @@ class DefaultFuzzyEvaluator(FuzzyEvaluator):
             logger.error("RapidFuzz library not found. Fuzzy matching will fail. Install with: pip install rapidfuzz")
 
     
-    def evaluate(self, pattern: FuzzyPattern , text: str) -> bool:
+    def evaluate(self, pattern: KeywordPattern, text: str, key: str = None) -> bool:
         """
         Check if a fuzzy pattern matches the text.
         

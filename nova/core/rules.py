@@ -24,6 +24,8 @@ class KeywordPattern:
     pattern: str
     is_regex: bool = False
     case_sensitive: bool = False  # Default to case-insensitive
+    is_fuzzy: bool = False 
+    threshold: int = 80  
 
 
 @dataclass
