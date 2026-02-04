@@ -1,7 +1,0 @@
-# Basic Nova Framework Requirements
-# Only includes core dependencies for keyword pattern matching
-# Using ~= (compatible release) to allow patch updates but prevent breaking changes
-
-requests~=2.31.0
-pyyaml~=6.0.1
-colorama~=0.4.6
