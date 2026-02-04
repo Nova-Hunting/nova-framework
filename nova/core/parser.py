@@ -18,10 +18,10 @@ logger = get_logger("nova.parser")
 # Precompile regex patterns for better performance
 RULE_NAME_PATTERN = re.compile(r'rule\s+(\w+)(?:\s*{)?')
 RULE_START_PATTERN = re.compile(r'rule\s+\w+\s*{?')
-SECTION_WILDCARD_PATTERN = re.compile(r'(keywords|semantics|llm)\.\*')
-VAR_PREFIX_PATTERN = re.compile(r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)\*')
+SECTION_WILDCARD_PATTERN = re.compile(r'(keywords|semantics|llm|fuzzy)\.\*')
+VAR_PREFIX_PATTERN = re.compile(r'(keywords|semantics|llm|fuzzy)\.\$([a-zA-Z0-9_]+)\*')
 ANY_OF_WILDCARD_PATTERN = re.compile(r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)')
-DIRECT_VAR_PATTERN = re.compile(r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)')
+DIRECT_VAR_PATTERN = re.compile(r'(keywords|semantics|llm|fuzzy)\.\$([a-zA-Z0-9_]+)')
 STANDALONE_VAR_PATTERN = re.compile(r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)')
 NESTED_QUANTIFIERS_PATTERN = re.compile(r'\b(any|all|[0-9]+)\s+of\s+(any|all|[0-9]+)\s+of\b')
 SECTION_REF_PATTERN = re.compile(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\.\$')
@@ -46,7 +46,7 @@ class NovaParser:
         self.variable_names = {
             'keywords': set(),
             'semantics': set(),
-            'llm': set()
+            'llm': set()        
         }
     
     def parse(self, content: str) -> NovaRule:
@@ -151,6 +151,7 @@ class NovaParser:
             result[key] = value
             
         return result
+
     
     def _parse_semantics_section(self, content: List[str]) -> Dict[str, SemanticPattern]:
         """Parse semantic patterns from the semantics section."""
@@ -296,74 +297,73 @@ class NovaParser:
         seen_variables = set()
         
         for line_num, line in enumerate(content):
-            # Skip empty lines and comments
             if not line or line.strip().startswith('#'):
                 continue
             
-            # Split the line into variable and pattern
             try:
                 key, value = map(str.strip, line.split('=', 1))
             except ValueError:
-                # Line doesn't contain an equals sign
-                raise NovaParserError(
-                    f"Invalid keyword pattern at line {line_num}: '{line}'. Patterns must be in the format '$var = \"pattern\"'")
+                raise NovaParserError(f"Invalid keyword pattern at line {line_num}: '{line}'")
             
-            # Check for "$var" format
             if not key.startswith('$'):
-                raise NovaParserError(
-                    f"Invalid keyword variable at line {line_num}: '{key}'. Variable names must start with $")
+                raise NovaParserError(f"Invalid variable name '{key}' at line {line_num}")
             
-            # Check for duplicate variable names
-            if key in seen_variables:
-                raise NovaParserError(
-                    f"Duplicate variable '{key}' at line {line_num}. Variable names must be unique within each section.")
-            
-            # Track that we've seen this variable
             seen_variables.add(key)
-            
-            # Track variable name for reference
             self.variable_names['keywords'].add(key)
             
             value = value.strip()
-            
+
+            # --- ADD THESE INITIALIZATIONS HERE ---
+            is_fuzzy = False
+            threshold = 80
+            case_sensitive = False
+            # --------------------------------------
+
+            # 1. Check for Fuzzy Marker at the end of the line
+            # Matches: "pattern" (85) fuzzy OR "pattern" fuzzy
+            fuzzy_match = re.search(r'\((?P<threshold>\d+)\)\s+fuzzy$|(?P<marker>fuzzy)$', value, re.IGNORECASE)
+            if fuzzy_match:
+                is_fuzzy = True
+                if fuzzy_match.group('threshold'):
+                    threshold = int(fuzzy_match.group('threshold'))
+                
+                # Remove the fuzzy part from the value string so it doesn't break regex/string logic
+                value = re.sub(r'\s*\(\d+\)\s+fuzzy$|\s+fuzzy$', '', value, flags=re.IGNORECASE).strip()
+
+            # 2. Identify if it is a Regex
             is_regex = value.startswith('/') and value.rstrip('i').endswith('/')
-            case_sensitive = False  # Default to case-insensitive for all patterns
             
             if is_regex:
-                # Regex pattern handling
                 if value.endswith('i'):
-                    value = value[1:-2]  # Remove /.../ and i flag
+                    value = value[1:-2]
                 else:
-                    value = value[1:-1]  # Remove /.../ only
-                    
-                # Check if there's a case:true modifier
+                    value = value[1:-1]
+                
                 if "case:true" in value:
-                    parts = value.split("case:true", 1)
-                    value = parts[0].strip()
+                    value = value.replace("case:true", "").strip()
                     case_sensitive = True
                 
-                # Validate the regex pattern
                 try:
                     re.compile(value)
                 except re.error as e:
-                    raise NovaParserError(
-                        f"Invalid regex pattern at line {line_num}: '{value}'. Regex error: {str(e)}")
+                    raise NovaParserError(f"Invalid regex: {e}")
             else:
-                # Regular string pattern handling
-                if not (value.startswith('"') and value.endswith('"')) and not (value.startswith("'") and value.endswith("'")):
-                    raise NovaParserError(
-                        f"Invalid keyword pattern at line {line_num}: '{value}'. Patterns must be in quotes or as regex.")
+                # 3. Handle standard quoted strings
+                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
                 
-                # Extract pattern without quotes
-                value = value[1:-1]
-                
-                # Check for case sensitivity modifier
                 if "case:true" in value:
-                    parts = value.split("case:true", 1)
-                    value = parts[0].strip()
+                    value = value.replace("case:true", "").strip()
                     case_sensitive = True
-                    
-            result[key] = KeywordPattern(pattern=value, is_regex=is_regex, case_sensitive=case_sensitive)
+            
+            # Now all variables (is_fuzzy, threshold, etc.) are defined!
+            result[key] = KeywordPattern(
+                pattern=value, 
+                is_regex=is_regex, 
+                case_sensitive=case_sensitive,
+                is_fuzzy=is_fuzzy, 
+                threshold=threshold
+            )
             
         return result
 
@@ -400,7 +400,7 @@ class NovaParser:
                 f"Invalid nested quantifiers at position {pos}: '{match.group(0)}'. Quantifiers cannot be nested. Context: '...{context}...'")
         
         # Validate section references - check for misspelled section names
-        valid_sections = ['keywords', 'semantics', 'llm']
+        valid_sections = ['keywords', 'semantics', 'llm' , 'fuzzy']
         
         # Find all potential section references that aren't in our valid list
         for match in SECTION_REF_PATTERN.finditer(condition):
@@ -674,8 +674,8 @@ class NovaParser:
 
     def _check_unused_variables(self):
         """
-        Check for variables defined in pattern sections but not used in the condition,
-        even when wildcards are present.
+        Check for variables defined in pattern sections but not used in the condition.
+        Updated to handle fuzzy-to-keyword mapping.
         """
         # Get all defined variables
         all_variables = set()
@@ -686,49 +686,41 @@ class NovaParser:
         used_variables = set()
         condition = self.rule.condition
         
-        # Check for variables used via section wildcards
-        section_wildcards = {
-            'keywords': False,
-            'semantics': False,
-            'llm': False
-        }
+        # 1. Check for section wildcards (e.g., keywords.*, fuzzy.*)
+        section_wildcards = ['keywords', 'semantics', 'llm', 'fuzzy']
         
         for section in section_wildcards:
-            if f"{section}.*" in condition:
-                section_wildcards[section] = True
-                # Mark all variables in this section as used
-                used_variables.update(self.variable_names[section])
+            if f"{section}.*" in condition or f"any of {section}.*" in condition:
+                if section == 'fuzzy':
+                    # 'fuzzy.*' uses all keywords marked as fuzzy
+                    for var_name, pattern in self.rule.keywords.items():
+                        if getattr(pattern, 'is_fuzzy', False):
+                            used_variables.add(var_name)
+                elif section in self.variable_names:
+                    used_variables.update(self.variable_names[section])
         
-        # Check for section-specific prefix wildcards (e.g., keywords.$bypass*)
-        for section in ['keywords', 'semantics', 'llm']:
+        # 2. Check for prefix wildcards (e.g., keywords.$bypass*)
+        for section in ['keywords', 'semantics', 'llm', 'fuzzy']:
             pattern = rf'{section}\.\$([a-zA-Z0-9_]+)\*'
             for match in re.finditer(pattern, condition):
                 prefix = match.group(1)
-                # Mark all variables with this prefix in this section as used
-                for var in self.variable_names[section]:
-                    if var[1:].startswith(prefix):  # Remove $ from var name
-                        used_variables.add(var)
+                # Map fuzzy prefix to keywords section
+                target_section = 'keywords' if section == 'fuzzy' else section
+                if target_section in self.variable_names:
+                    for var in self.variable_names[target_section]:
+                        if var[1:].startswith(prefix):
+                            used_variables.add(var)
         
-        # Check for "any of" wildcard patterns
-        any_of_pattern = r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
-        for match in re.finditer(any_of_pattern, condition):
-            prefix = match.group(1)
-            # Mark variables with this prefix from all sections as used
-            for section_vars in self.variable_names.values():
-                for var in section_vars:
-                    if var[1:].startswith(prefix):
-                        used_variables.add(var)
-        
-        # Check for direct variable references
-        var_pattern = r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)(?!\*)'
+        # 3. Check for direct variable references (e.g., fuzzy.$admin)
+        # We add 'fuzzy' to the capture group here
+        var_pattern = r'(keywords|semantics|llm|fuzzy)\.\$([a-zA-Z0-9_]+)(?!\*)'
         for match in re.finditer(var_pattern, condition):
-            section = match.group(1)
             var_name = f"${match.group(2)}"
             used_variables.add(var_name)
         
-        # Check for standalone variables
-        var_pattern = r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)(?!\*)'
-        for match in re.finditer(var_pattern, condition):
+        # 4. Check for standalone variables ($var)
+        standalone_pattern = r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)(?!\*)'
+        for match in re.finditer(standalone_pattern, condition):
             used_variables.add(match.group(1))
         
         # Find unused variables
@@ -754,95 +746,80 @@ class NovaParser:
     def _validate_condition_variables(self):
         """
         Validate variable references in the condition.
-        Check that referenced variables exist and handle wildcards correctly.
-        
-        Raises:
-            NovaParserError: If the condition references undefined variables
+        Updated to allow 'fuzzy' as a valid section mapping to 'keywords'.
         """
         condition = self.rule.condition
-        
-        # First, replace all known patterns in the condition to simplify later matching
         working_condition = condition
         
-        # Handle section wildcards and variable wildcards first
-        
-        # 1. Check section.* patterns (e.g., keywords.*)
+        # 1. Check section.* patterns (e.g., keywords.*, fuzzy.*)
         for match in SECTION_WILDCARD_PATTERN.finditer(working_condition):
             section = match.group(1)
-            # This is a valid pattern, remove it from working condition
             working_condition = working_condition.replace(f"{section}.*", "TRUE")
         
-        # 2. Check section.$prefix* patterns (e.g., semantics.$injection*)
+        # 2. Check section.$prefix* patterns (e.g., fuzzy.$injection*)
         for match in VAR_PREFIX_PATTERN.finditer(condition):
             section = match.group(1)
             prefix = match.group(2)
             full_match = match.group(0)
             
-            # Check if any variable starts with this prefix
+            # Map fuzzy to keywords
+            check_section = 'keywords' if section == 'fuzzy' else section
+            
             has_match = False
-            for var in self.variable_names[section]:
-                if var[1:].startswith(prefix):  # Remove $ from var name
+            for var in self.variable_names.get(check_section, set()):
+                if var[1:].startswith(prefix):
                     has_match = True
                     break
-                    
+            
             if not has_match:
                 raise NovaParserError(
                     f"Wildcard '{full_match}' in condition doesn't match any defined variables")
             
-            # Remove this pattern from working condition to avoid overlap
             working_condition = working_condition.replace(full_match, "TRUE")
         
-        # 3. Handle "any of" wildcards
+        # 3. Handle "any of" wildcards (Logic remains same, fuzzy is handled in loop)
         for match in ANY_OF_WILDCARD_PATTERN.finditer(condition):
             prefix = match.group(1)
             full_match = match.group(0)
-            
-            # Check if any variable starts with this prefix
             has_match = False
             for section_vars in self.variable_names.values():
                 for var in section_vars:
                     if var[1:].startswith(prefix):
                         has_match = True
                         break
-                if has_match:
-                    break
-                    
+                if has_match: break
             if not has_match:
-                raise NovaParserError(
-                    f"Wildcard '{full_match}' in condition doesn't match any defined variables")
-            
-            # Remove this pattern from working condition
+                raise NovaParserError(f"Wildcard '{full_match}' in condition doesn't match any defined variables")
             working_condition = working_condition.replace(full_match, "TRUE")
         
-        # Now check direct variable references in the simplified condition
-        
-        # 4. Check section.$var patterns (e.g., semantics.$injection)
+        # 4. Check section.$var patterns (e.g., fuzzy.$admin)
         for match in DIRECT_VAR_PATTERN.finditer(working_condition):
             section = match.group(1)
             var_name = f"${match.group(2)}"
             
-            if section not in self.variable_names:
-                raise NovaParserError(
-                    f"Invalid section '{section}' in condition")
-                    
-            if var_name not in self.variable_names[section]:
+            # --- FIX START ---
+            # Allow 'fuzzy' section name
+            if section not in self.variable_names and section != 'fuzzy':
+                raise NovaParserError(f"Invalid section '{section}' in condition")
+            
+            # Map fuzzy lookup to keywords variable names
+            check_section = 'keywords' if section == 'fuzzy' else section
+            
+            if var_name not in self.variable_names.get(check_section, set()):
                 raise NovaParserError(
                     f"Condition references undefined variable '{var_name}' in {section} section")
-        
+            # --- FIX END ---
+            
         # 5. Check standalone variables ($var)
         for match in STANDALONE_VAR_PATTERN.finditer(working_condition):
             var_name = match.group(1)
-            
-            # Check if the variable exists in any section
             found = False
             for section_vars in self.variable_names.values():
                 if var_name in section_vars:
                     found = True
                     break
-            
             if not found:
-                raise NovaParserError(
-                    f"Condition references undefined variable '{var_name}'")
+                raise NovaParserError(f"Condition references undefined variable '{var_name}'")
 
 
 class NovaRuleFileParser:

@@ -24,6 +24,22 @@ class KeywordPattern:
     pattern: str
     is_regex: bool = False
     case_sensitive: bool = False  # Default to case-insensitive
+    is_fuzzy: bool = False 
+    threshold: int = 80  
+
+
+@dataclass
+class FuzzyPattern:
+    """
+    Pattern for fuzzy matching with support for regex and case sensitivity.
+    
+    Attributes:
+        pattern: The string or regex pattern to match
+        case_sensitive: Whether the match should be case-sensitive
+    """
+    pattern: str
+    threshold: float
+    case_sensitive: bool = False  # Default to case-insensitive
 
 
 @dataclass
@@ -70,4 +86,5 @@ class NovaRule:
     keywords: Dict[str, KeywordPattern] = field(default_factory=dict)
     semantics: Dict[str, SemanticPattern] = field(default_factory=dict)
     llms: Dict[str, LLMPattern] = field(default_factory=dict)
+    fuzzy: Dict[str , FuzzyPattern] = field(default_factory=dict)
     condition: str = ""

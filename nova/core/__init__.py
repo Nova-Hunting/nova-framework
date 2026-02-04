@@ -9,6 +9,7 @@ Description: Core components package initialization
 
 from nova.core.rules import (
     KeywordPattern,
+    FuzzyPattern,
     SemanticPattern,
     LLMPattern,
     NovaRule
@@ -19,6 +20,7 @@ from nova.core.scanner import NovaScanner
 
 __all__ = [
     'KeywordPattern',
+    'FuzzyPattern',
     'SemanticPattern',
     'LLMPattern',
     'NovaRule',

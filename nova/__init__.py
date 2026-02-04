@@ -27,6 +27,7 @@ from nova.core.rules import (
     KeywordPattern,
     SemanticPattern,
     LLMPattern,
+    FuzzyPattern,
     NovaRule
 )
 from nova.core.matcher import NovaMatcher
@@ -37,6 +38,7 @@ from nova.utils.logger import get_logger, set_log_level
 
 __all__ = [
     'KeywordPattern',
+    'FuzzyPattern',
     'SemanticPattern',
     'LLMPattern',
     'NovaRule',

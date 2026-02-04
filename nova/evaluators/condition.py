@@ -11,7 +11,8 @@ from typing import Dict, Any
 import re
 
 def evaluate_condition(condition: str, keyword_matches: Dict[str, bool], 
-                       semantic_matches: Dict[str, bool], llm_matches: Dict[str, bool] = None) -> bool:
+                       semantic_matches: Dict[str, bool], llm_matches: Dict[str, bool] = None , 
+                       fuzzy_matches: Dict[str, bool] = None) -> bool:
     """
     Evaluate a condition expression against pattern match results.
     Handles wildcards correctly with improved parsing for complex expressions.
@@ -32,6 +33,10 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
     # Initialize llm_matches if not provided
     if llm_matches is None:
         llm_matches = {}
+
+    # Initialise fuzzy_matches if not provided
+    if fuzzy_matches is None:
+        fuzzy_matches = {}
     
     # Make a copy of the original condition for debugging
     original_condition = condition
@@ -70,10 +75,14 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
     if "any of llm.*" in eval_condition:
         any_llm = any(llm_matches.values())
         eval_condition = eval_condition.replace("any of llm.*", "True" if any_llm else "False")
+
+    if "any of fuzzy.*" in eval_condition:
+        any_fuzzy = any(fuzzy_matches.values())
+        eval_condition = eval_condition.replace("any of fuzzy.*", "True" if any_fuzzy else "False")
     
     # Handle section-specific prefix wildcards
     # Pattern matches "section.$prefix*"
-    pattern = r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)\*'
+    pattern = r'(keywords|semantics|llm|fuzzy)\.\$([a-zA-Z0-9_]+)\*'
     for match in re.finditer(pattern, eval_condition):
         section = match.group(1).lower()
         prefix = match.group(2)
@@ -83,7 +92,8 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
         matches_dict = {
             'keywords': keyword_matches,
             'semantics': semantic_matches,
-            'llm': llm_matches
+            'llm': llm_matches,
+            'fuzzy': fuzzy_matches,
         }.get(section, {})
         
         # Check if any variable with this prefix matches
@@ -108,6 +118,10 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
     if "llm.*" in eval_condition:
         any_llm = any(llm_matches.values())
         eval_condition = eval_condition.replace("llm.*", "True" if any_llm else "False")
+
+    if "fuzzy.*" in eval_condition:
+        any_fuzzy = any(fuzzy_matches.values())
+        eval_condition = eval_condition.replace("fuzzy.*", "True" if any_fuzzy else "False")
     
     # Handle "any of" with wildcards - pattern matches: "any of ($prefix*)"
     any_of_pattern = r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
@@ -117,7 +131,7 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
         
         # Check if any variable with this prefix matches in any section
         matches = False
-        for var_dict in [keyword_matches, semantic_matches, llm_matches]:
+        for var_dict in [keyword_matches, semantic_matches, llm_matches , fuzzy_matches]:
             for var, value in var_dict.items():
                 if var[1:].startswith(prefix) and value:
                     matches = True
@@ -129,7 +143,7 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
         eval_condition = eval_condition.replace(original, "True" if matches else "False")
     
     # Handle "N of" pattern - replace with actual boolean result
-    n_of_pattern = r'(\d+)\s+of\s+(keywords|semantics|llm)'
+    n_of_pattern = r'(\d+)\s+of\s+(keywords|semantics|llm|fuzzy)'
     for match in re.finditer(n_of_pattern, eval_condition):
         original = match.group(0)
         n = int(match.group(1))
@@ -145,6 +159,9 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
         elif category == "llm":
             match_count = sum(llm_matches.values())
             result = match_count >= n
+        elif category == "fuzzy":
+            match_count = sum(fuzzy_matches.values())
+            result = match_count >= n
         else:
             result = False
             
@@ -155,7 +172,7 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
     # Handle different formats: "section.$var", "$var"
     
     # First, handle fully qualified variables (section.$var)
-    section_var_pattern = r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)(?!\*)'
+    section_var_pattern = r'(keywords|semantics|llm|fuzzy)\.\$([a-zA-Z0-9_]+)(?!\*)'
     for match in re.finditer(section_var_pattern, eval_condition):
         section = match.group(1)
         var_name = "$" + match.group(2)
@@ -169,6 +186,8 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
             match_value = semantic_matches[var_name]
         elif section == "llm" and var_name in llm_matches:
             match_value = llm_matches[var_name]
+        elif section == "fuzzy" and var_name in fuzzy_matches:
+            match_value = fuzzy_matches[var_name]
             
         # Replace in evaluation condition
         eval_condition = eval_condition.replace(original, "True" if match_value else "False")
@@ -187,6 +206,8 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
             match_value = semantic_matches[var_name]
         elif var_name in llm_matches:
             match_value = llm_matches[var_name]
+        elif var_name in fuzzy_matches:
+            match_value = fuzzy_matches[var_name]
             
         # Replace in evaluation condition
         eval_condition = eval_condition.replace(original, "True" if match_value else "False")
@@ -232,7 +253,7 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
         # Special case handling for common patterns that might fail in eval
         
         # If the condition is just a single section.$ reference and there's a match
-        if re.match(r'^(keywords|semantics|llm)\.\$[a-zA-Z0-9_]+$', original_condition):
+        if re.match(r'^(keywords|semantics|llm|fuzzy)\.\$[a-zA-Z0-9_]+$', original_condition):
             try:
                 section, var = original_condition.split('.')
                 if section == "keywords" and var in keyword_matches:
@@ -241,6 +262,8 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
                     return semantic_matches[var]
                 elif section == "llm" and var in llm_matches:
                     return llm_matches[var]
+                elif section == "fuzzy" and var in fuzzy_matches:
+                    return fuzzy_matches[var]
             except Exception:
                 # If any error occurs in this special case handling, continue to the next one
                 pass
@@ -262,6 +285,9 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
                     elif part.startswith("llm.$"):
                         var = part.replace("llm.", "")
                         results.append(llm_matches.get(var, False))
+                    elif part.startswith("fuzzy.$"):
+                        var = part.replace("fuzzy.", "")
+                        results.append(fuzzy_matches.get(var, False))
                     elif part.startswith("$"):
                         if part in keyword_matches:
                             results.append(keyword_matches[part])
@@ -269,6 +295,8 @@ def evaluate_condition(condition: str, keyword_matches: Dict[str, bool],
                             results.append(semantic_matches[part])
                         elif part in llm_matches:
                             results.append(llm_matches[part])
+                        elif part in fuzzy_matches:
+                            results.append(fuzzy_matches[part])
                         else:
                             results.append(False)
                 
@@ -322,12 +350,14 @@ def check_prompt_safe(prompt, matcher_obj):
             "matching_keywords": {},
             "matching_semantics": {},
             "matching_llm": {},
+            "matching_fuzzy" : {},
             "debug": {
                 "condition": matcher_obj.rule.condition,
                 "condition_result": False,
                 "all_keyword_matches": {},
                 "all_semantic_matches": {},
-                "all_llm_matches": {}
+                "all_llm_matches": {},
+                "all_fuzzy_matches": {}
             }
         }
     

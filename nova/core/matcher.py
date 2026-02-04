@@ -10,50 +10,34 @@ Description: Core matcher implementation for Nova rules
 from typing import Dict, List, Tuple, Optional, Any, Set, Callable
 import re
 
-from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern
+from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern, FuzzyPattern
 from nova.evaluators.keywords import DefaultKeywordEvaluator
-from nova.evaluators.condition import (
-    evaluate_condition,
-    can_semantics_change_outcome,
-    can_llm_change_outcome
-)
+from nova.evaluators.condition import evaluate_condition
 from nova.utils.logger import get_logger
 
 # Get logger for this module
 logger = get_logger("nova.matcher")
 
-# Lazy-loaded module references - avoids expensive imports at module load time
-_DefaultSemanticEvaluator = None
-_OpenAIEvaluator = None
-_LLMEvaluator = None
-_imports_attempted = {'semantic': False, 'llm': False}
+# Optional imports - these may not be available if extras not installed
+DefaultSemanticEvaluator = None
+OpenAIEvaluator = None
+LLMEvaluator = None
+DefaultFuzzyEvaluator = None 
 
+try:
+    from nova.evaluators.semantics import DefaultSemanticEvaluator
+except ImportError:
+    pass
 
-def _get_semantic_evaluator_class():
-    """Lazy import of DefaultSemanticEvaluator - only loads when actually needed."""
-    global _DefaultSemanticEvaluator, _imports_attempted
-    if not _imports_attempted['semantic']:
-        _imports_attempted['semantic'] = True
-        try:
-            from nova.evaluators.semantics import DefaultSemanticEvaluator
-            _DefaultSemanticEvaluator = DefaultSemanticEvaluator
-        except ImportError:
-            pass
-    return _DefaultSemanticEvaluator
+try:
+    from nova.evaluators.llm import OpenAIEvaluator, LLMEvaluator
+except ImportError:
+    pass
 
-
-def _get_llm_evaluator_classes():
-    """Lazy import of LLM evaluators - only loads when actually needed."""
-    global _OpenAIEvaluator, _LLMEvaluator, _imports_attempted
-    if not _imports_attempted['llm']:
-        _imports_attempted['llm'] = True
-        try:
-            from nova.evaluators.llm import OpenAIEvaluator, LLMEvaluator
-            _OpenAIEvaluator = OpenAIEvaluator
-            _LLMEvaluator = LLMEvaluator
-        except ImportError:
-            pass
-    return _OpenAIEvaluator, _LLMEvaluator
+try:
+    from nova.evaluators.fuzzy import DefaultFuzzyEvaluator
+except ImportError:
+    pass
 
 
 class NovaMatcher:
@@ -66,6 +50,7 @@ class NovaMatcher:
     def __init__(self, 
                  rule: NovaRule,
                  keyword_evaluator: Optional[DefaultKeywordEvaluator] = None,
+                 fuzzy_evaluator: Optional[Any] = None,
                  semantic_evaluator: Optional[Any] = None,  # DefaultSemanticEvaluator might not be available
                  llm_evaluator: Optional[Any] = None,       # LLMEvaluator might not be available
                  create_llm_evaluator: bool = True):
@@ -99,47 +84,59 @@ class NovaMatcher:
             needs_llm = True
         elif rule and 'llm.' in rule.condition.lower():
             needs_llm = True
-        
+
+        needs_fuzzy = False
+        # Check if rule has fuzzy section (handle attribute safely)
+        if rule and rule.fuzzy:
+            needs_fuzzy = True
+        elif rule and 'fuzzy' in rule.condition.lower():
+            needs_fuzzy = True
+
         # Only initialize semantic evaluator if needed
         if needs_semantic:
             if semantic_evaluator:
                 self.semantic_evaluator = semantic_evaluator
+            elif DefaultSemanticEvaluator is not None:
+                self.semantic_evaluator = DefaultSemanticEvaluator()
             else:
-                # Lazy import - only load the module when actually needed
-                SemanticEvalClass = _get_semantic_evaluator_class()
-                if SemanticEvalClass is not None:
-                    self.semantic_evaluator = SemanticEvalClass()
-                else:
-                    self.semantic_evaluator = None
-                    logger.warning("Rule requires semantic evaluation but sentence-transformers not available. Install with: pip install nova-hunting")
+                self.semantic_evaluator = None
+                logger.warning("Rule requires semantic evaluation but sentence-transformers not available. Install with: pip install nova-hunting[llm]")
         else:
             self.semantic_evaluator = None
-
+            
         # Handle LLM evaluator initialization
         if llm_evaluator:
             # Use provided evaluator regardless of need
             self.llm_evaluator = llm_evaluator
         elif needs_llm and create_llm_evaluator:
-            # Lazy import - only load the module when actually needed
-            OpenAIEval, _ = _get_llm_evaluator_classes()
-            if OpenAIEval is not None:
-                self.llm_evaluator = OpenAIEval()
+            # Create a new evaluator if needed and allowed to create
+            if OpenAIEvaluator is not None:
+                self.llm_evaluator = OpenAIEvaluator()
             else:
                 self.llm_evaluator = None
-                logger.warning("Rule requires LLM evaluation but LLM dependencies not available. Install with: pip install nova-hunting")
+                logger.warning("Rule requires LLM evaluation but LLM dependencies not available. Install with: pip install nova-hunting[llm]")
         else:
             # No evaluator provided and either not needed or not allowed to create
             self.llm_evaluator = None
             if needs_llm:
                 logger.warning("Rule requires LLM evaluation but no evaluator provided and creation disabled.")
+            # Remove the verbose message for rules that don't need LLM evaluation
+
+        if fuzzy_evaluator:
+            self.fuzzy_evaluator = fuzzy_evaluator
+        elif needs_fuzzy:
+            if DefaultFuzzyEvaluator is not None:
+                self.fuzzy_evaluator = DefaultFuzzyEvaluator()
+            else:
+                self.fuzzy_evaluator = None
+                logger.warning("Rule requires fuzzy evaluation but rapidfuzz not available.")
+        else:
+            self.fuzzy_evaluator = None
+        
         
         # Pre-compile keyword patterns for performance
         if rule:
             self._precompile_patterns()
-            # Pre-compute condition analysis (static for rule's lifetime)
-            self._cached_needed_patterns = self._analyze_condition(rule.condition)
-        else:
-            self._cached_needed_patterns = None
 
     def _precompile_patterns(self):
         """Pre-compile regex patterns for better performance."""
@@ -154,17 +151,12 @@ class NovaMatcher:
         """
         Update the matcher with a new rule.
         This is more efficient than creating a new matcher instance.
-
+        
         Args:
             rule: The new NovaRule to match against
         """
         self.rule = rule
         self._precompile_patterns()
-        # Update cached condition analysis for new rule
-        if rule:
-            self._cached_needed_patterns = self._analyze_condition(rule.condition)
-        else:
-            self._cached_needed_patterns = None
     
     def _analyze_condition(self, condition: str) -> Dict[str, Set[str]]:
         """
@@ -178,23 +170,24 @@ class NovaMatcher:
         """
         needed_patterns = {
             'keywords': set(),
+            'fuzzy': set(),      # Track which keywords need fuzzy evaluation
             'semantics': set(),
             'llm': set(),
             'section_wildcards': set()
         }
         
-        # Check for section wildcards
-        for section in ['keywords', 'semantics', 'llm']:
+        # 1. Check for section wildcards (e.g., keywords.*, fuzzy.*)
+        for section in ['keywords', 'semantics', 'llm', 'fuzzy']:
             if f"{section}.*" in condition:
                 needed_patterns['section_wildcards'].add(section)
                 
-        # Check for "any of" section wildcards
-        for section in ['keywords', 'semantics', 'llm']:
+        # 2. Check for "any of" section wildcards
+        for section in ['keywords', 'semantics', 'llm', 'fuzzy']:
             if f"any of {section}.*" in condition:
                 needed_patterns['section_wildcards'].add(section)
 
-        # Check for direct variable references with section prefixes
-        for section in ['keywords', 'semantics', 'llm']:
+        # 3. Check for direct variable references with section prefixes (e.g., fuzzy.$var)
+        for section in ['keywords', 'semantics', 'llm', 'fuzzy']:
             # Exact references: "section.$var"
             pattern = rf'{section}\.\$([a-zA-Z0-9_]+)(?!\*)'
             for match in re.finditer(pattern, condition):
@@ -205,17 +198,26 @@ class NovaMatcher:
             wildcard_pattern = rf'{section}\.\$([a-zA-Z0-9_]+)\*'
             for match in re.finditer(wildcard_pattern, condition):
                 prefix = match.group(1)
+                
+                # REDIRECT: If the condition asks for 'fuzzy.', we look for the data in 'keywords'
+                if section == 'fuzzy':
+                    search_in = self.rule.keywords
+                else:
+                    search_in = getattr(self.rule, section, {})
+                
                 # Add all matching variables to needed patterns
-                for var_name in getattr(self.rule, section, {}):
+                for var_name in search_in:
                     if var_name[1:].startswith(prefix):  # Remove $ from var name
                         needed_patterns[section].add(var_name)
         
-        # Check for standalone variables ($var)
+        # 4. Check for standalone variables ($var)
         var_pattern = r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)(?!\*)'
         for match in re.finditer(var_pattern, condition):
             var_name = match.group(1)
             
-            # Determine which section this variable belongs to
+            # Standalone variables default to their respective sections.
+            # We removed the 'elif var_name in self.rule.fuzzy' block 
+            # because 'fuzzy' is now an attribute of 'keywords'.
             if var_name in self.rule.keywords:
                 needed_patterns['keywords'].add(var_name)
             elif var_name in self.rule.semantics:
@@ -223,12 +225,12 @@ class NovaMatcher:
             elif var_name in self.rule.llms:
                 needed_patterns['llm'].add(var_name)
         
-        # Check for "any of" wildcards
+        # 5. Check for "any of" wildcards (e.g., any of ($prefix*))
         any_of_pattern = r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
         for match in re.finditer(any_of_pattern, condition):
             prefix = match.group(1)
             
-            # Add all matching variables from all sections
+            # We removed 'fuzzy' from this list because the data is in 'keywords'
             for section, patterns in [
                 ('keywords', self.rule.keywords),
                 ('semantics', self.rule.semantics),
@@ -243,168 +245,219 @@ class NovaMatcher:
     def check_prompt(self, prompt: str) -> Dict[str, Any]:
         """
         Check if a prompt matches the rule.
-
-        Uses short-circuit evaluation: evaluates patterns in order of cost
-        (keywords → semantics → LLM) and stops as soon as condition is satisfied.
-
+        
         Args:
             prompt: The prompt text to check
-
+            
         Returns:
             Dictionary containing match results and details
         """
-        # Use cached condition analysis (pre-computed at initialization)
+        # Extract variables needed based on the condition
         condition = self.rule.condition
-        needed_patterns = self._cached_needed_patterns or self._analyze_condition(condition)
-
+        needed_patterns = self._analyze_condition(condition)
+        
         # Track all evaluation results for debugging
         all_keyword_matches = {}
+        all_fuzzy_matches = {}
         all_semantic_matches = {}
         all_semantic_scores = {}
         all_llm_matches = {}
         all_llm_scores = {}
-
+        
+        # Dictionary to hold evaluation functions for lazy evaluation
+        lazy_evaluations = {}
+        
         # Initialize filtered dictionaries to hold results needed for condition evaluation
         keyword_matches = {}
+        fuzzy_matches = {}
         semantic_matches = {}
         llm_matches = {}
-
-        # Helper function to build final results
-        def build_results(has_match: bool, condition_result: Any) -> Dict[str, Any]:
-            return {
-                'matched': has_match,
-                'rule_name': self.rule.name,
-                'meta': self.rule.meta,
-                'matching_keywords': {k: v for k, v in keyword_matches.items() if v},
-                'matching_semantics': {k: v for k, v in semantic_matches.items() if v},
-                'matching_llm': {k: v for k, v in llm_matches.items() if v},
-                'semantic_scores': all_semantic_scores,
-                'llm_scores': all_llm_scores,
-                'debug': {
-                    'condition': condition,
-                    'condition_result': condition_result,
-                    'all_keyword_matches': all_keyword_matches,
-                    'all_semantic_matches': all_semantic_matches,
-                    'all_llm_matches': all_llm_matches
-                }
-            }
-
-        # ------ STAGE 1: EVALUATE KEYWORDS (fastest) ------
-
-        # Evaluate keywords needed by condition or section wildcards
+        
+        # ------ LAZY PATTERN EVALUATION ------
+        
+        # Set up lazy evaluation functions for keywords
         for key, pattern in self.rule.keywords.items():
+            # Only include if explicitly needed by condition or section wildcard is used
             if key in needed_patterns['keywords'] or 'keywords' in needed_patterns['section_wildcards']:
-                try:
-                    result = self.keyword_evaluator.evaluate(pattern, prompt, key)
-                    all_keyword_matches[key] = result
-                    keyword_matches[key] = result
-                except Exception as e:
-                    logger.error(f"Error evaluating keywords.{key}: {str(e)}")
-                    all_keyword_matches[key] = False
-                    keyword_matches[key] = False
-
-        # Update keyword_matches for wildcards
-        if 'keywords' in needed_patterns['section_wildcards']:
-            keyword_matches.update(all_keyword_matches)
-
-        # SHORT-CIRCUIT CHECK: Try to evaluate condition with just keywords
-        # If condition is satisfied (e.g., OR condition with keyword match), skip expensive evaluations
-        if condition:
-            try:
-                early_result = evaluate_condition(condition, keyword_matches, {}, {})
-                if early_result:
-                    # Condition satisfied with just keywords - no need for semantic/LLM
-                    return build_results(True, early_result)
-            except Exception:
-                # Can't determine yet, continue with more patterns
-                pass
-
-        # ------ STAGE 2: EVALUATE SEMANTICS (medium cost) ------
-
-        # Check if semantics could possibly change the outcome before running expensive evaluation
-        skip_semantics = False
-        if condition and not can_semantics_change_outcome(condition, keyword_matches):
-            # Semantics can't change the outcome - skip this evaluation stage
-            skip_semantics = True
-            logger.debug(f"Skipping semantic evaluation for rule '{self.rule.name}' - can't change outcome")
-
-        if self.semantic_evaluator and not skip_semantics:
+                lazy_evaluations[('keywords', key)] = lambda p=pattern, k=key: self.keyword_evaluator.evaluate(p, prompt, k)
+        
+        # Set up lazy evaluation functions for semantics (if evaluator exists)
+        if self.semantic_evaluator:
             for key, pattern in self.rule.semantics.items():
+                # Only include if explicitly needed by condition or section wildcard is used
                 if key in needed_patterns['semantics'] or 'semantics' in needed_patterns['section_wildcards']:
-                    try:
-                        matched, score = self.semantic_evaluator.evaluate(pattern, prompt)
-                        all_semantic_matches[key] = matched
-                        all_semantic_scores[key] = score
-                        semantic_matches[key] = matched
-                    except Exception as e:
-                        logger.error(f"Error evaluating semantics.{key}: {str(e)}")
-                        all_semantic_matches[key] = False
-                        all_semantic_scores[key] = 0.0
-                        semantic_matches[key] = False
-
-            # Update semantic_matches for wildcards
-            if 'semantics' in needed_patterns['section_wildcards']:
-                semantic_matches.update(all_semantic_matches)
-
-            # SHORT-CIRCUIT CHECK: Try with keywords + semantics
-            if condition:
-                try:
-                    early_result = evaluate_condition(condition, keyword_matches, semantic_matches, {})
-                    if early_result:
-                        # Condition satisfied - no need for expensive LLM evaluation
-                        return build_results(True, early_result)
-                except Exception:
-                    # Can't determine yet, continue
-                    pass
-
-        # ------ STAGE 3: EVALUATE LLM PATTERNS (most expensive) ------
-
-        # Check if LLM could possibly change the outcome before running expensive API calls
-        skip_llm = False
-        if condition and not can_llm_change_outcome(condition, keyword_matches, semantic_matches):
-            # LLM can't change the outcome - skip this evaluation stage
-            skip_llm = True
-            logger.debug(f"Skipping LLM evaluation for rule '{self.rule.name}' - can't change outcome")
-
-        if self.llm_evaluator and not skip_llm:
+                    lazy_evaluations[('semantics', key)] = lambda p=pattern: self.semantic_evaluator.evaluate(p, prompt)
+        
+        # Set up lazy evaluation functions for LLMs (if evaluator exists)
+        if self.llm_evaluator:
             for key, pattern in self.rule.llms.items():
+                # Only include if explicitly needed by condition or section wildcard is used
                 if key in needed_patterns['llm'] or 'llm' in needed_patterns['section_wildcards']:
-                    try:
-                        # Note: pattern.threshold is used as LLM temperature (0.0=deterministic, 1.0=creative)
-                        # The LLM itself determines if the pattern matches; threshold controls response variability
-                        llm_temperature = pattern.threshold
-                        matched, confidence, details = self.llm_evaluator.evaluate_prompt(
-                            pattern.pattern, prompt, temperature=llm_temperature
-                        )
-                        all_llm_matches[key] = matched
-                        all_llm_scores[key] = confidence
-                        llm_matches[key] = matched
-                    except Exception as e:
-                        logger.error(f"Error evaluating llm.{key}: {str(e)}")
-                        all_llm_matches[key] = False
-                        all_llm_scores[key] = 0.0
-                        llm_matches[key] = False
+                    temperature = pattern.threshold
+                    lazy_evaluations[('llm', key)] = lambda p=pattern, t=temperature: self.llm_evaluator.evaluate_prompt(p.pattern, prompt, temperature=t)
+        
+        if self.fuzzy_evaluator:
+            for var_name in needed_patterns['fuzzy']:
+                pattern_obj = self.rule.keywords.get(var_name)
+                if pattern_obj:
+                    lazy_evaluations[('fuzzy', var_name)] = lambda p=pattern_obj, k=var_name:self.fuzzy_evaluator.evaluate(p, prompt, key=k)
 
-            # Update llm_matches for wildcards
-            if 'llm' in needed_patterns['section_wildcards']:
-                llm_matches.update(all_llm_matches)
-
-        # ------ FINAL CONDITION EVALUATION ------
-
+        # First evaluate only the patterns that are directly referenced in the condition
+        # Create a list of sections and variables to evaluate based on what evaluators are available
+        patterns_to_evaluate = [('keywords', name) for name in needed_patterns['keywords']]
+        
+        if self.semantic_evaluator:
+            patterns_to_evaluate += [('semantics', name) for name in needed_patterns['semantics']]
+            
+        if self.llm_evaluator:
+            patterns_to_evaluate += [('llm', name) for name in needed_patterns['llm']]
+        
+        if self.fuzzy_evaluator:
+            patterns_to_evaluate += [('fuzzy', name) for name in needed_patterns['fuzzy']]
+            
+        # Evaluate each pattern
+        for section, var_name in patterns_to_evaluate:
+            eval_key = (section, var_name)
+            if eval_key in lazy_evaluations:
+                try:
+                    if section == 'keywords':
+                        result = lazy_evaluations[eval_key]()
+                        all_keyword_matches[var_name] = result
+                        keyword_matches[var_name] = result
+                    elif section == 'semantics':
+                        matched, score = lazy_evaluations[eval_key]()
+                        all_semantic_matches[var_name] = matched
+                        all_semantic_scores[var_name] = score
+                        semantic_matches[var_name] = matched
+                    elif section == 'llm':
+                        matched, confidence, details = lazy_evaluations[eval_key]()
+                        all_llm_matches[var_name] = matched
+                        all_llm_scores[var_name] = confidence
+                        llm_matches[var_name] = matched
+                    elif section == 'fuzzy':
+                        matched = lazy_evaluations[eval_key]()
+                        all_fuzzy_matches[var_name] = matched
+                        fuzzy_matches[var_name] = matched
+                except Exception as e:
+                    logger.error(f"Error evaluating {section}.{var_name}: {str(e)}")
+                    # Default to False on error
+                    if section == 'keywords':
+                        all_keyword_matches[var_name] = False
+                        keyword_matches[var_name] = False
+                    elif section == 'semantics':
+                        all_semantic_matches[var_name] = False
+                        all_semantic_scores[var_name] = 0.0
+                        semantic_matches[var_name] = False
+                    elif section == 'llm':
+                        all_llm_matches[var_name] = False
+                        all_llm_scores[var_name] = 0.0
+                        llm_matches[var_name] = False
+                    elif section == 'fuzzy':
+                        all_fuzzy_matches[var_name] = False
+                        fuzzy_matches[var_name] = False
+        
+        # Process section wildcards if needed
+        for section in needed_patterns['section_wildcards']:
+            if section == 'keywords' and not all_keyword_matches:
+                # Only evaluate all keywords if needed and not already evaluated
+                for key, pattern in self.rule.keywords.items():
+                    if key not in all_keyword_matches:
+                        try:
+                            result = self.keyword_evaluator.evaluate(pattern, prompt, key)
+                            all_keyword_matches[key] = result
+                        except Exception:
+                            all_keyword_matches[key] = False
+            
+            elif section == 'semantics' and self.semantic_evaluator and not all_semantic_matches:
+                # Only evaluate all semantics if needed and not already evaluated
+                for key, pattern in self.rule.semantics.items():
+                    if key not in all_semantic_matches:
+                        try:
+                            matched, score = self.semantic_evaluator.evaluate(pattern, prompt)
+                            all_semantic_matches[key] = matched
+                            all_semantic_scores[key] = score
+                        except Exception:
+                            all_semantic_matches[key] = False
+                            all_semantic_scores[key] = 0.0
+            
+            elif section == 'llm' and self.llm_evaluator and not all_llm_matches:
+                # Only evaluate all LLM patterns if needed and not already evaluated
+                for key, pattern in self.rule.llms.items():
+                    if key not in all_llm_matches:
+                        try:
+                            temperature = pattern.threshold
+                            matched, confidence, details = self.llm_evaluator.evaluate_prompt(pattern.pattern, prompt, temperature=temperature)
+                            all_llm_matches[key] = matched
+                            all_llm_scores[key] = confidence
+                        except Exception:
+                            all_llm_matches[key] = False
+                            all_llm_scores[key] = 0.0
+            elif section == 'fuzzy' and self.fuzzy_evaluator:
+                # Proactively scan all keywords marked as fuzzy for the fuzzy.* wildcard
+                for key, pattern in self.rule.keywords.items():
+                    # Only process keywords the user marked with the 'fuzzy' keyword
+                    if getattr(pattern, 'is_fuzzy', False):
+                        if key not in all_fuzzy_matches:
+                            try:
+                                result = self.fuzzy_evaluator.evaluate(pattern, prompt, key=key)
+                                all_fuzzy_matches[key] = result
+                                # We must put the result in fuzzy_matches for the condition evaluator
+                                fuzzy_matches[key] = result 
+                            except Exception:
+                                all_fuzzy_matches[key] = False
+                                fuzzy_matches[key] = False
+                        else:
+                            # If already evaluated by a direct reference earlier, 
+                            # ensure it's copied into the condition dict
+                            fuzzy_matches[key] = all_fuzzy_matches[key]
+        
+        # Evaluate condition if provided
         has_match = False
         condition_result = None
-
+        
         if condition:
-            # Final evaluation with all pattern results
+            # Make sure eval_condition gets all variables that might be needed by wildcards
+            if 'keywords' in needed_patterns['section_wildcards']:
+                keyword_matches.update(all_keyword_matches)
+            if 'semantics' in needed_patterns['section_wildcards'] and self.semantic_evaluator:
+                semantic_matches.update(all_semantic_matches)
+            if 'llm' in needed_patterns['section_wildcards'] and self.llm_evaluator:
+                llm_matches.update(all_llm_matches)
+            if 'fuzzy' in needed_patterns['section_wildcards'] and self.fuzzy_evaluator:
+                fuzzy_matches.update(all_fuzzy_matches)
+                
+            # Use the condition evaluator with filtered match types
             condition_result = evaluate_condition(
-                condition,
+                condition, 
                 keyword_matches,
-                semantic_matches,
-                llm_matches
+                semantic_matches, 
+                llm_matches,
+                fuzzy_matches
             )
             has_match = condition_result
         else:
             # Fall back to original behavior if no condition is specified
             has_match = any(keyword_matches.values()) or any(semantic_matches.values()) or any(llm_matches.values())
-
-        return build_results(has_match, condition_result)
+        
+        # Build results with matching variables only
+        results = {
+            'matched': has_match,
+            'rule_name': self.rule.name,
+            'meta': self.rule.meta,
+            'matching_keywords': {k: v for k, v in keyword_matches.items() if v},
+            'matching_semantics': {k: v for k, v in semantic_matches.items() if v},
+            'matching_llm': {k: v for k, v in llm_matches.items() if v},
+            'matching_fuzzy': {k: v for k, v in fuzzy_matches.items() if v},
+            'semantic_scores': all_semantic_scores,
+            'llm_scores': all_llm_scores,
+            'debug': {
+                'condition': condition,
+                'condition_result': condition_result,
+                'all_keyword_matches': all_keyword_matches,
+                'all_semantic_matches': all_semantic_matches,
+                'all_llm_matches': all_llm_matches,
+                'all_fuzzy_matches': all_fuzzy_matches
+            }
+        }
+        
+        return results

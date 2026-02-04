@@ -362,12 +362,12 @@ def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: b
     if result['matched']:
         print(f"\n{Fore.CYAN}Matching Patterns:")
         
-        if result['matching_keywords']:
+        if 'matching_keywords' in result and result['matching_keywords']:
             print(f"  {Fore.GREEN}Keywords:")
             for key in result['matching_keywords']:
                 print(f"    {Fore.WHITE}• {key}")
         
-        if result['matching_semantics']:
+        if 'matching_semantics' in result and result['matching_semantics']:
             print(f"  {Fore.GREEN}Semantics:")
             for key in result['matching_semantics']:
                 print(f"    {Fore.WHITE}• {key}")
@@ -375,6 +375,11 @@ def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: b
         if 'matching_llm' in result and result['matching_llm']:
             print(f"  {Fore.GREEN}LLM:")
             for key in result['matching_llm']:
+                print(f"    {Fore.WHITE}• {key}")
+
+        if 'matching_fuzzy' in result and result['matching_fuzzy']:
+            print(f"  {Fore.GREEN}Fuzzy Matches:")
+            for key in result['matching_fuzzy']:
                 print(f"    {Fore.WHITE}• {key}")
     
     # Print debug information if verbose mode is enabled
@@ -397,6 +402,12 @@ def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: b
             if 'all_keyword_matches' in debug:
                 print(f"\n{Fore.MAGENTA}Keyword Matches:")
                 for key, value in debug['all_keyword_matches'].items():
+                    match_color = Fore.GREEN if value else Fore.RED
+                    print(f"  {Fore.CYAN}{key}: {match_color}{value}")
+
+            if 'all_fuzzy_matches' in debug:
+                print(f"\n{Fore.MAGENTA}Fuzzy Matches (Detailed):")
+                for key, value in debug['all_fuzzy_matches'].items():
                     match_color = Fore.GREEN if value else Fore.RED
                     print(f"  {Fore.CYAN}{key}: {match_color}{value}")
             

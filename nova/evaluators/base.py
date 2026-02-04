@@ -33,6 +33,10 @@ class KeywordEvaluator(BaseEvaluator):
     """Base class for keyword pattern evaluators."""
     pass
 
+class FuzzyEvaluator(BaseEvaluator):
+    """Base class for fuzzy pattern evaluators."""
+    pass
+
 
 class SemanticEvaluator(BaseEvaluator):
     """Base class for semantic pattern evaluators."""
