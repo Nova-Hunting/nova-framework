@@ -302,6 +302,27 @@ def validate_regex(pattern):
 
 
 # Fix for None prompt handling in the matcher
+def can_llm_change_outcome(condition: str, keyword_matches: Dict[str, bool], semantic_matches: Dict[str, bool]) -> bool:
+    """Check if LLM patterns could change the outcome based on keyword and semantic matches.
+    
+    NOTE: This is a placeholder stub - actual logic not implemented yet.
+    Returns True to ensure LLM evaluations are always performed.
+    """
+    return True
+
+
+
+# Placeholder stub - actual logic not implemented yet
+def can_semantics_change_outcome(condition: str, keyword_matches: Dict[str, bool]) -> bool:
+    """Check if semantic patterns could change the outcome based on keyword matches.
+    
+    NOTE: This is a placeholder stub - actual logic not implemented yet.
+    Returns True to ensure semantic evaluations are always performed.
+    """
+    return True
+
+
+# Fix for None prompt handling in the matcher
 def check_prompt_safe(prompt, matcher_obj):
     """
     Safely check a prompt against a rule, handling None and other edge cases.
