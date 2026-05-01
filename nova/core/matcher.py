@@ -263,6 +263,7 @@ class NovaMatcher:
         all_semantic_scores = {}
         all_llm_matches = {}
         all_llm_scores = {}
+        all_llm_details = {}
 
         # Initialize filtered dictionaries to hold results needed for condition evaluation
         keyword_matches = {}
@@ -285,7 +286,8 @@ class NovaMatcher:
                     'condition_result': condition_result,
                     'all_keyword_matches': all_keyword_matches,
                     'all_semantic_matches': all_semantic_matches,
-                    'all_llm_matches': all_llm_matches
+                    'all_llm_matches': all_llm_matches,
+                    'all_llm_details': all_llm_details
                 }
             }
 
@@ -379,12 +381,17 @@ class NovaMatcher:
                         all_llm_matches[key] = matched
                         all_llm_scores[key] = confidence
                         llm_matches[key] = matched
+                        all_llm_details[key] = details
                     except Exception as e:
                         logger.error(f"Error evaluating llm.{key}: {str(e)}")
                         all_llm_matches[key] = False
                         all_llm_scores[key] = 0.0
                         llm_matches[key] = False
 
+                        all_llm_details[key] = {
+                            "error": str(e),
+                            "evaluator_type": "unknown",
+                        }
             # Update llm_matches for wildcards
             if 'llm' in needed_patterns['section_wildcards']:
                 llm_matches.update(all_llm_matches)

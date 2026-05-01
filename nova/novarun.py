@@ -319,6 +319,27 @@ def print_section_header(title, char="-"):
     print(f"{Fore.YELLOW}{title}")
     print(f"{Fore.YELLOW}{char*70}")
 
+def print_llm_reasons(result: Dict[str, Any]) -> None:
+    debug = result.get("debug", {})
+    llm_details = debug.get("all_llm_details", {})
+    debug = result.get("debug", {})
+    llm_details = debug.get("all_llm_details", {})
+    """Print LLM reason fields captured by NovaMatcher."""
+    debug = result.get("debug", {})
+    llm_details = debug.get("all_llm_details", {})
+    reasons = {
+        key: details.get("reason")
+        for key, details in llm_details.items()
+        if isinstance(details, dict) and details.get("reason")
+    }
+    if not reasons:
+        return
+
+    print(f"\n{Fore.MAGENTA}LLM Reason:")
+    for key, reason in reasons.items():
+        print(f"  {Fore.CYAN}{key}: {Fore.WHITE}{reason}")
+
+
 
 def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: bool = False, 
                  rule_number=None, total_rules=None, prompt_number=None, total_prompts=None) -> None:
@@ -425,6 +446,8 @@ def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: b
                         score_color = Fore.GREEN if value >= 0.7 else Fore.YELLOW if value >= 0.5 else Fore.RED
                         print(f"  {Fore.CYAN}{key}: {score_color}{value:.4f}")
 
+                # Print LLM reasons in verbose mode
+                print_llm_reasons(result)
 
 def print_summary(matched_count: int, total_rules: int):
     """
