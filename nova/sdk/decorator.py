@@ -4,11 +4,14 @@ Nova SDK Standalone Decorator
 Standalone protect decorator for simpler usage without creating Nova instance first.
 """
 
-import functools
-from typing import Union, Optional, Callable, List, Any
+from typing import TYPE_CHECKING, Union, Optional, Callable, List
 from pathlib import Path
 
 from .policy import Action
+
+if TYPE_CHECKING:
+    from .nova import Nova
+    from .result import ScanResult
 
 
 # Global Nova instance for standalone decorator

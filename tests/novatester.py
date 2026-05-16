@@ -2,15 +2,12 @@
 NOVA: The Prompt Pattern Matching Validation Test
 Author: Claude
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Validation test suite for Nova rules and framework
 """
 
 import sys
-import os
-import json
-from typing import Dict, List, Any, Tuple, Optional
-import re
+from typing import Dict, Any
 
 # Add Nova module path if needed
 # sys.path.append('/path/to/nova')
@@ -62,7 +59,7 @@ class MockEvaluators:
                 if var_name is None:
                     var_name = str(pattern)
                     # Last resort: just return the first semantic match if any exist
-                    if not var_name in semantic_results and semantic_results:
+                    if var_name not in semantic_results and semantic_results:
                         var_name = next(iter(semantic_results))
                 
                 if var_name and var_name in semantic_results:

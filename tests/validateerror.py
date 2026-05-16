@@ -3,7 +3,7 @@
 NOVA: Rule System Validator
 Author: Claude
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: A script to validate Nova rules and detect potential issues
 """
 
@@ -12,14 +12,12 @@ import sys
 import re
 import json
 import argparse
-from typing import Dict, List, Any, Tuple, Optional, Set
 import traceback
 
 # Add Nova module path if needed
 # sys.path.append('/path/to/nova')
 
-from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern
-from nova.core.parser import NovaParser, NovaRuleFileParser
+from nova.core.parser import NovaRuleFileParser
 from nova.core.matcher import NovaMatcher
 from nova.evaluators.condition import evaluate_condition
 

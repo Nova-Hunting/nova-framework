@@ -51,6 +51,8 @@ class ScanResult:
     matches: List[RuleMatch] = field(default_factory=list)
     actions_taken: Dict[str, Action] = field(default_factory=dict)
     redactions: List[Dict[str, Any]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    rule_warnings: Dict[str, List[str]] = field(default_factory=dict)
 
     @property
     def blocked(self) -> bool:
@@ -98,6 +100,11 @@ class ScanResult:
         return len(self.matches)
 
     @property
+    def has_warnings(self) -> bool:
+        """Returns True if any rule produced scan warnings."""
+        return len(self.warnings) > 0
+
+    @property
     def blocked_rules(self) -> List[str]:
         """Returns list of rule names that triggered BLOCK action."""
         return [m.rule_name for m in self.matches if m.action == Action.BLOCK]
@@ -140,16 +147,21 @@ class ScanResult:
             "match_count": self.match_count,
             "blocked_rules": self.blocked_rules,
             "flagged_rules": self.flagged_rules,
+            "warnings": self.warnings,
+            "rule_warnings": self.rule_warnings,
             "matches": [
                 {
                     "rule_name": m.rule_name,
                     "meta": m.meta,
                     "action": m.action.value,
                     "severity": m.severity,
+                    "source_file": m.source_file,
                     "matching_keywords": m.matching_keywords,
                     "matching_semantics": m.matching_semantics,
+                    "matching_llm": m.matching_llm,
                     "semantic_scores": m.semantic_scores,
                     "llm_scores": m.llm_scores,
+                    "matched_patterns": m.matched_patterns,
                 }
                 for m in self.matches
             ],
@@ -167,12 +179,16 @@ class ScanResult:
         Useful for troubleshooting false positives or understanding
         which patterns triggered matches.
         """
-        print(f"\n[NOVA DEBUG] Scan Result Summary")
+        print("\n[NOVA DEBUG] Scan Result Summary")
         print(f"[NOVA DEBUG] Matches: {self.match_count}")
         print(f"[NOVA DEBUG] Blocked: {self.blocked}")
         print(f"[NOVA DEBUG] Flagged: {self.flagged}")
         print(f"[NOVA DEBUG] Redacted: {self.redacted}")
         print(f"[NOVA DEBUG] Highest Severity: {self.highest_severity or 'N/A'}")
+        if self.warnings:
+            print(f"[NOVA DEBUG] Warnings: {len(self.warnings)}")
+            for warning in self.warnings:
+                print(f"  - {warning}")
 
         if not self.matches:
             print("[NOVA DEBUG] No matches - input is clean")
@@ -191,28 +207,28 @@ class ScanResult:
                 matched_kw = [k for k, v in match.matching_keywords.items() if v]
                 print(f"  Keywords matched: {matched_kw if matched_kw else 'None'}")
             else:
-                print(f"  Keywords matched: None")
+                print("  Keywords matched: None")
 
             # Semantics with scores
             if match.matching_semantics or match.semantic_scores:
-                print(f"  Semantics matched:")
+                print("  Semantics matched:")
                 for name in set(list(match.matching_semantics.keys()) + list(match.semantic_scores.keys())):
                     matched = match.matching_semantics.get(name, False)
                     score = match.semantic_scores.get(name, 0)
                     status = "← MATCH" if matched else ""
                     print(f"    - {name}: score={score:.3f} {status}")
             else:
-                print(f"  Semantics matched: None")
+                print("  Semantics matched: None")
 
             # LLM
             if match.matching_llm or match.llm_scores:
-                print(f"  LLM matched:")
+                print("  LLM matched:")
                 for name in set(list(match.matching_llm.keys()) + list(match.llm_scores.keys())):
                     matched = match.matching_llm.get(name, False)
                     score = match.llm_scores.get(name, 0)
                     status = "← MATCH" if matched else ""
                     print(f"    - {name}: score={score:.3f} {status}")
             else:
-                print(f"  LLM matched: None")
+                print("  LLM matched: None")
 
         print()  # Final newline for readability

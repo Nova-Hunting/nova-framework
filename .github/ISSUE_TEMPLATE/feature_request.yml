@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a new capability or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What limitation or workflow does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, API, or workflow you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - parser
+        - matcher
+        - scanner
+        - evaluator
+        - SDK
+        - CLI
+        - packaging
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Public API, rule syntax, provider, dependency, or migration concerns.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

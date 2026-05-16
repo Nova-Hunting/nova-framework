@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """
 NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia 
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Command-line tool for running Nova rules against prompts
 """
 
@@ -25,30 +26,19 @@ except ImportError:
     # Transformers not available - that's OK for basic keyword matching
     pass
 
+import argparse
 import os
 import sys
-import argparse
-import re
-import requests
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 import colorama
-from colorama import Fore, Style, Back
+from colorama import Fore, Back
 
 # Import Nova components
 try:
-    from nova.core.parser import NovaParser
+    from nova.core.parser import NovaParser, NovaRuleFileParser
     from nova.core.matcher import NovaMatcher
-    from nova.core.scanner import NovaScanner
     from nova.utils.config import get_config
-    from nova.evaluators.llm import (
-        OpenAIEvaluator, 
-        AnthropicEvaluator, 
-        AzureOpenAIEvaluator, 
-        OllamaEvaluator,
-        GroqEvaluator,
-        get_validated_evaluator
-    )
+    from nova.evaluators.llm import get_validated_evaluator
 except ImportError:
     print("Error: Nova package not found in PYTHONPATH.")
     print("Make sure Nova is installed or set your PYTHONPATH correctly.")
@@ -56,6 +46,80 @@ except ImportError:
 
 # Initialize colorama
 colorama.init(autoreset=True)
+
+SUPPORTED_LLM_PROVIDERS = ['openai', 'anthropic', 'azure', 'ollama', 'groq', 'openrouter']
+
+CONFIG_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "azure": "AZURE_OPENAI_API_KEY",
+    "azure_openai": "AZURE_OPENAI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+
+def _config_value(section: Dict[str, Any], *keys: str) -> Any:
+    """Return the first non-empty config value matching any key."""
+    if not isinstance(section, dict):
+        return None
+
+    lower_section = {str(key).lower(): value for key, value in section.items()}
+    for key in keys:
+        value = lower_section.get(key.lower())
+        if value not in (None, ""):
+            return value
+
+    return None
+
+
+def _normalize_llm_provider(provider: Any) -> str:
+    """Normalize config provider names to CLI evaluator names."""
+    provider_name = str(provider).strip().lower().replace("-", "_")
+    if provider_name == "azure_openai":
+        provider_name = "azure"
+
+    if provider_name not in SUPPORTED_LLM_PROVIDERS:
+        expected = ", ".join(SUPPORTED_LLM_PROVIDERS)
+        raise ValueError(f"Unsupported LLM provider '{provider}'. Expected one of: {expected}")
+
+    return provider_name
+
+
+def apply_config_to_args(args: argparse.Namespace) -> None:
+    """
+    Apply --config values to CLI execution.
+
+    Explicit CLI flags stay first, environment variables stay ahead of file
+    values, and file defaults are not treated as explicit model choices.
+    """
+    if not args.config:
+        return
+
+    config = get_config(args.config)
+    llm_config = config.get_section("llm")
+    api_keys = config.get_section("api_keys")
+
+    if args.llm is None:
+        args.llm = _normalize_llm_provider(_config_value(llm_config, "provider") or "openai")
+
+    if args.model is None:
+        configured_model = config.get_file_value("llm", "model")
+        if configured_model not in (None, ""):
+            os.environ.setdefault("NOVA_LLM_MODEL", str(configured_model))
+
+    for config_key, env_name in CONFIG_API_KEY_ENV.items():
+        configured_key = _config_value(api_keys, config_key)
+        if configured_key not in (None, ""):
+            os.environ.setdefault(env_name, str(configured_key))
+
+    endpoint = _config_value(llm_config, "azure_endpoint", "azure_openai_endpoint", "endpoint")
+    if endpoint not in (None, ""):
+        os.environ.setdefault("AZURE_OPENAI_ENDPOINT", str(endpoint))
+
+    host = _config_value(llm_config, "ollama_host", "host")
+    if host not in (None, ""):
+        os.environ.setdefault("OLLAMA_HOST", str(host))
 
 
 def load_rule_file(file_path: str) -> str:
@@ -119,70 +183,7 @@ def extract_rules(content: str) -> List[str]:
     Returns:
         List of strings, each containing a single rule
     """
-    # Pattern to find rule declarations
-    rule_start_pattern = r'rule\s+\w+\s*{?'
-    rule_starts = [m.start() for m in re.finditer(rule_start_pattern, content)]
-    
-    if not rule_starts:
-        return []
-    
-    # Extract each rule block
-    rule_blocks = []
-    
-    for i in range(len(rule_starts)):
-        start = rule_starts[i]
-        
-        # End is either the start of the next rule or the end of the content
-        end = rule_starts[i+1] if i < len(rule_starts) - 1 else len(content)
-        
-        # Extract the rule text
-        rule_text = content[start:end].strip()
-        
-        # Ensure the rule has a closing brace
-        if not _has_balanced_braces(rule_text):
-            # Try to find where the rule should end
-            possible_end = _find_rule_end(rule_text)
-            if possible_end > 0:
-                rule_text = rule_text[:possible_end].strip()
-        
-        rule_blocks.append(rule_text)
-    
-    return rule_blocks
-
-
-def _has_balanced_braces(text: str) -> bool:
-    """Check if braces are balanced in a text."""
-    count = 0
-    
-    for char in text:
-        if char == '{':
-            count += 1
-        elif char == '}':
-            count -= 1
-            
-        # Negative count means too many closing braces
-        if count < 0:
-            return False
-    
-    # All braces should be closed
-    return count == 0
-
-
-def _find_rule_end(text: str) -> int:
-    """Find the most likely end position of a rule."""
-    # Count opening braces
-    count = 0
-    for i, char in enumerate(text):
-        if char == '{':
-            count += 1
-        elif char == '}':
-            count -= 1
-            
-            # When count reaches 0, we've found the end of the rule
-            if count == 0:
-                return i + 1
-    
-    return -1
+    return NovaRuleFileParser()._extract_rule_blocks_optimized(content)
 
 
 def check_if_rule_needs_llm(rule) -> bool:
@@ -233,7 +234,7 @@ def process_prompt(rule_text: str, prompt: str, verbose: bool = False,
         rule_text: Nova rule definition
         prompt: Prompt to check
         verbose: Whether to enable verbose output
-        llm_type: Type of LLM evaluator to use ('openai', 'anthropic', 'azure', or 'ollama')
+        llm_type: Type of LLM evaluator to use ('openai', 'anthropic', 'azure', 'ollama', 'groq', or 'openrouter')
         model: Optional model name to use
         llm_evaluator: Optional pre-existing LLM evaluator to reuse
         
@@ -248,6 +249,19 @@ def process_prompt(rule_text: str, prompt: str, verbose: bool = False,
     except Exception as e:
         print(f"{Fore.RED}Error parsing rule: {e}")
         sys.exit(1)
+
+    return process_rule(rule, prompt, verbose, llm_type, model, llm_evaluator)
+
+
+def process_rule(rule, prompt: str, verbose: bool = False,
+                 llm_type: str = 'openai', model: Optional[str] = None,
+                 llm_evaluator: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Process a prompt against an already parsed rule.
+
+    This keeps multi-rule CLI execution on the same parsed objects used for
+    fail-fast validation, avoiding divergent parsing paths.
+    """
     
     # Check if this rule needs LLM evaluation
     needs_llm = check_if_rule_needs_llm(rule)
@@ -320,10 +334,6 @@ def print_section_header(title, char="-"):
     print(f"{Fore.YELLOW}{char*70}")
 
 def print_llm_reasons(result: Dict[str, Any]) -> None:
-    debug = result.get("debug", {})
-    llm_details = debug.get("all_llm_details", {})
-    debug = result.get("debug", {})
-    llm_details = debug.get("all_llm_details", {})
     """Print LLM reason fields captured by NovaMatcher."""
     debug = result.get("debug", {})
     llm_details = debug.get("all_llm_details", {})
@@ -339,6 +349,16 @@ def print_llm_reasons(result: Dict[str, Any]) -> None:
     for key, reason in reasons.items():
         print(f"  {Fore.CYAN}{key}: {Fore.WHITE}{reason}")
 
+
+def print_evaluation_warnings(result: Dict[str, Any]) -> None:
+    """Print fail-closed or degraded-evaluation warnings from NovaMatcher."""
+    warnings = result.get("debug", {}).get("evaluation_warnings", [])
+    if not warnings:
+        return
+
+    print(f"\n{Fore.YELLOW}Evaluation Warnings:")
+    for warning in warnings:
+        print(f"  {Fore.YELLOW}- {Fore.WHITE}{warning}")
 
 
 def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: bool = False, 
@@ -378,6 +398,7 @@ def print_result(result: Dict[str, Any], rule_path: str, prompt: str, verbose: b
     
     match_status = f"{Back.GREEN}{Fore.BLACK} MATCHED " if result['matched'] else f"{Back.RED}{Fore.WHITE} NOT MATCHED "
     print(f"\n{Fore.WHITE}Result: {match_status}")
+    print_evaluation_warnings(result)
     
     # Print match details
     if result['matched']:
@@ -528,8 +549,8 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-c', '--config', help='Path to Nova configuration file')
     parser.add_argument('-s', '--single', action='store_true', help='Check against only the first rule in the file (default reads all rules)')
-    parser.add_argument('-l', '--llm', choices=['openai', 'anthropic', 'azure', 'ollama', 'groq'], 
-                       default='openai', help='LLM evaluator to use')
+    parser.add_argument('-l', '--llm', choices=SUPPORTED_LLM_PROVIDERS,
+                       help='LLM evaluator to use (default: openai unless --config sets a provider)')
     parser.add_argument('-m', '--model', help='Specific model to use with the LLM evaluator')
     
     # Keep the -a/--all flag for backward compatibility, but make it a no-op (all rules is now default)
@@ -537,13 +558,13 @@ def main():
     
     args = parser.parse_args()
     
-    # Load config if specified
-    if args.config:
-        try:
-            get_config(args.config)
-        except Exception as e:
-            print(f"{Fore.RED}Error loading config file: {e}")
-            sys.exit(1)
+    try:
+        apply_config_to_args(args)
+    except Exception as e:
+        print(f"{Fore.RED}Error applying config file: {e}")
+        sys.exit(1)
+
+    args.llm = args.llm or 'openai'
     
     # Load the rule file
     file_content = load_rule_file(args.rule)
@@ -559,29 +580,21 @@ def main():
             sys.exit(1)
         print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
     
-    # Check if the file might contain multiple rules
-    if not args.single and 'rule ' in file_content.lower() and file_content.count('rule ') > 1:
+    # Check if the file contains multiple rules using the shared rule-file extractor.
+    rule_blocks = extract_rules(file_content)
+    if not args.single and len(rule_blocks) > 1:
         # Extract all rules from the file
-        rule_blocks = extract_rules(file_content)
-        
         if not rule_blocks:
             print(f"{Fore.RED}No valid rules found in {args.rule}")
             sys.exit(1)
             
         print(f"\n{Fore.CYAN}Found {Fore.WHITE}{len(rule_blocks)}{Fore.CYAN} rules in {Fore.WHITE}{args.rule}")
         
-        # Parse all rules first
-        parser = NovaParser()
-        parsed_rules = []
-        for rule_idx, rule_text in enumerate(rule_blocks):
-            try:
-                rule = parser.parse(rule_text)
-                parsed_rules.append(rule)
-            except Exception as e:
-                print(f"{Fore.RED}Error parsing rule #{rule_idx+1}: {e}")
-        
-        if not parsed_rules:
-            print(f"{Fore.RED}Failed to parse any rules. Exiting.")
+        # Parse all rules first and fail closed on malformed or duplicate rules.
+        try:
+            parsed_rules = NovaRuleFileParser().parse_content(file_content, args.rule)
+        except Exception as e:
+            print(f"{Fore.RED}Error parsing rule file: {e}")
             sys.exit(1)
             
         # Check if any rule needs LLM evaluation and create a single evaluator if needed
@@ -605,13 +618,13 @@ def main():
         for prompt_idx, prompt in enumerate(prompts):
             prompt_matched = False
             matched_count = 0
-            total_rules = len(rule_blocks)
+            total_rules = len(parsed_rules)
             prompt_results = []
             
-            for rule_idx, (rule_text, rule) in enumerate(zip(rule_blocks, parsed_rules)):
+            for rule_idx, rule in enumerate(parsed_rules):
                 try:
                     # Use the shared LLM evaluator for all rules
-                    result = process_prompt(rule_text, prompt, args.verbose, args.llm, args.model, llm_evaluator)
+                    result = process_rule(rule, prompt, args.verbose, args.llm, args.model, llm_evaluator)
                     prompt_results.append(result)
                     
                     if result['matched']:

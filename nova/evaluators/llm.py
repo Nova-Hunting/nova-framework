@@ -3,7 +3,7 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: LLM-based evaluator implementations
 """
 
@@ -11,24 +11,197 @@ import os
 import json
 import requests
 import re
-from typing import Dict, List, Optional, Tuple, Any, Union
+import time
+import hashlib
+import threading
+from collections import OrderedDict
+from typing import Dict, Optional, Tuple, Any, Union
 from nova.evaluators.base import LLMEvaluator
 from nova.utils.logger import get_logger
 
 # Get logger for this module
 logger = get_logger("nova.evaluators.llm")
 
+PROVIDER_MODEL_ENV = {
+    "openai": "OPENAI_LLM_MODEL",
+    "anthropic": "ANTHROPIC_LLM_MODEL",
+    "azure": "AZURE_OPENAI_LLM_MODEL",
+    "ollama": "OLLAMA_LLM_MODEL",
+    "groq": "GROQ_LLM_MODEL",
+    "openrouter": "OPENROUTER_LLM_MODEL",
+}
 
-# Create a global session for connection reuse across all evaluators
+PROVIDER_MODEL_ENV_ALIASES = {
+    "azure": ("AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_MODEL"),
+    "openai": ("OPENAI_MODEL",),
+    "anthropic": ("ANTHROPIC_MODEL",),
+    "groq": ("GROQ_MODEL",),
+    "ollama": ("OLLAMA_MODEL",),
+    "openrouter": ("OPENROUTER_MODEL",),
+}
+
+
+def _get_env_model(llm_type: str) -> Optional[str]:
+    env_names = [PROVIDER_MODEL_ENV.get(llm_type.lower())]
+    env_names.extend(PROVIDER_MODEL_ENV_ALIASES.get(llm_type.lower(), ()))
+    env_names.append("NOVA_LLM_MODEL")
+
+    for env_name in env_names:
+        if env_name and os.environ.get(env_name):
+            return os.environ[env_name]
+    return None
+
+
+def _select_model(llm_type: str, explicit_model: Optional[str], default_model: str) -> str:
+    return explicit_model or _get_env_model(llm_type) or default_model
+
+
+class TTLLRUCache(OrderedDict):
+    """
+    LRU cache with TTL support and O(1) eviction.
+
+    Uses OrderedDict to maintain insertion order, enabling O(1) eviction
+    of the oldest entry (vs O(n log n) for sorting-based approaches).
+    Also supports time-based expiration via TTL.
+    """
+
+    def __init__(self, maxsize: int = 1000, ttl: float = 300.0):
+        """
+        Initialize the cache.
+
+        Args:
+            maxsize: Maximum number of entries in the cache
+            ttl: Time-to-live in seconds for cache entries
+        """
+        super().__init__()
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self._timestamps = {}  # Separate dict for timestamps to avoid nested access
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a value from the cache, checking TTL expiration.
+        Moves accessed item to end (most recently used).
+
+        Returns:
+            The cached value or None if not found/expired
+        """
+        if key not in self:
+            return None
+
+        # Check TTL expiration
+        if time.time() - self._timestamps.get(key, 0) >= self.ttl:
+            # Expired - remove and return None
+            del self[key]
+            self._timestamps.pop(key, None)
+            return None
+
+        # Move to end (most recently used) and return
+        self.move_to_end(key)
+        return OrderedDict.__getitem__(self, key)
+
+    def set(self, key: str, value: Dict[str, Any]) -> None:
+        """
+        Set a value in the cache with automatic LRU eviction.
+
+        O(1) eviction by removing from front of OrderedDict.
+        """
+        # If key exists, move to end
+        if key in self:
+            self.move_to_end(key)
+
+        # Store value and timestamp
+        OrderedDict.__setitem__(self, key, value)
+        self._timestamps[key] = time.time()
+
+        # Evict oldest entries if over capacity (O(1) per eviction)
+        while len(self) > self.maxsize:
+            oldest_key = next(iter(self))
+            del self[oldest_key]
+            self._timestamps.pop(oldest_key, None)
+
+    def __delitem__(self, key):
+        """Override to also clean up timestamp."""
+        OrderedDict.__delitem__(self, key)
+        self._timestamps.pop(key, None)
+
+    def clear(self):
+        """Clear both the cache and timestamps."""
+        OrderedDict.clear(self)
+        self._timestamps.clear()
+
+
+# Lazy-initialized shared session for connection reuse across all evaluators
 # This prevents repeated SSL handshakes and TCP connection establishment
-_SHARED_SESSION = requests.Session()
-# Configure session for optimal reuse (keep connections alive)
-_SHARED_SESSION.mount('https://', requests.adapters.HTTPAdapter(
-    pool_connections=20,  # Number of connection objects to keep in pool
-    pool_maxsize=20,      # Maximum number of connections in the pool
-    max_retries=3,        # Auto-retry failed requests
-    pool_block=False      # Don't block when pool is depleted
-))
+_SHARED_SESSION = None
+
+# Global LLM response cache for avoiding duplicate API calls
+# Uses TTLLRUCache for O(1) eviction instead of O(n log n) sorting
+_LLM_RESPONSE_CACHE = TTLLRUCache(maxsize=1000, ttl=300.0)
+
+# Threading locks for thread-safe cache and session access
+_LLM_CACHE_LOCK = threading.Lock()
+_SESSION_LOCK = threading.Lock()
+
+
+def _normalize_cache_temperature(temperature: float) -> str:
+    """Normalize temperature for stable cache keys."""
+    try:
+        return f"{float(temperature):.8g}"
+    except (TypeError, ValueError):
+        return str(temperature)
+
+
+def _get_llm_cache_key(prompt: str, text: str, model: str, temperature: float) -> str:
+    """Create a cache key from prompt+text+model+temperature combination.
+
+    Includes content lengths to reduce collision probability when using
+    truncated hash. Format: len(prompt):len(text):hash[:24]
+    """
+    content = f"{prompt}|{text}|{model}|temperature:{_normalize_cache_temperature(temperature)}"
+    content_hash = hashlib.sha256(content.encode()).hexdigest()[:24]
+    return f"{len(prompt)}:{len(text)}:{content_hash}"
+
+
+def _get_cached_response(prompt: str, text: str, model: str, temperature: float) -> Optional[Tuple[bool, float, Dict[str, Any]]]:
+    """Check if we have a valid cached response for this evaluation (thread-safe)."""
+    cache_key = _get_llm_cache_key(prompt, text, model, temperature)
+    with _LLM_CACHE_LOCK:
+        cached = _LLM_RESPONSE_CACHE.get(cache_key)
+        if cached is not None:
+            # Return cached result with cache_hit flag
+            details = {**cached['details'], 'cache_hit': True}
+            return cached['matched'], cached['confidence'], details
+    return None
+
+
+def _cache_response(prompt: str, text: str, model: str, temperature: float, matched: bool, confidence: float, details: Dict[str, Any]) -> None:
+    """Cache an LLM response for future use (thread-safe with O(1) eviction)."""
+    cache_key = _get_llm_cache_key(prompt, text, model, temperature)
+    with _LLM_CACHE_LOCK:
+        _LLM_RESPONSE_CACHE.set(cache_key, {
+            'matched': matched,
+            'confidence': confidence,
+            'details': details
+        })
+
+
+def _get_shared_session():
+    """Lazy initialization of shared session - only creates when first needed (thread-safe)."""
+    global _SHARED_SESSION
+    if _SHARED_SESSION is None:
+        with _SESSION_LOCK:
+            # Double-check after acquiring lock
+            if _SHARED_SESSION is None:
+                _SHARED_SESSION = requests.Session()
+                # Configure session for optimal reuse (keep connections alive)
+                _SHARED_SESSION.mount('https://', requests.adapters.HTTPAdapter(
+                    pool_connections=20,  # Number of connection objects to keep in pool
+                    pool_maxsize=20,      # Maximum number of connections in the pool
+                    max_retries=3,        # Auto-retry failed requests
+                    pool_block=False      # Don't block when pool is depleted
+                ))
+    return _SHARED_SESSION
 
 
 class OpenAIEvaluator(LLMEvaluator):
@@ -48,7 +221,9 @@ class OpenAIEvaluator(LLMEvaluator):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.model = model
         self.base_url = "https://api.openai.com/v1/chat/completions"
-        self.session = _SHARED_SESSION  # Use shared session for connection reuse
+        self.session = _get_shared_session()  # Use shared session for connection reuse
+        self.evaluator_type = "openai"
+        self.log_label = "OpenAI"
         
         # Validate API key
         if not self.api_key:
@@ -71,19 +246,29 @@ class OpenAIEvaluator(LLMEvaluator):
     def evaluate_prompt(self, prompt_template: str, text: str, temperature: float = 0.1) -> Tuple[bool, float, Dict[str, Any]]:
         """
         Evaluate a text using the provided prompt template with OpenAI API.
-        
+
         Args:
             prompt_template: The prompt to send to the LLM
             text: The text to evaluate
             temperature: Temperature setting for the model (0.0-1.0)
-            
+
         Returns:
             Tuple of (matched, confidence, details)
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str) or not text.strip():
+            return False, 0.0, {"error": "Invalid or empty text"}
+
         if not self.api_key:
             # No API key available
             return False, 0.0, {"error": "No API key available"}
-        
+
+        # Check cache first
+        cache_model = f"{self.evaluator_type}:{self.model}"
+        cached = _get_cached_response(prompt_template, text, cache_model, temperature)
+        if cached is not None:
+            return cached
+
         try:
             # Format the complete prompt
             full_prompt = (
@@ -91,7 +276,7 @@ class OpenAIEvaluator(LLMEvaluator):
                 f"Text to evaluate: {text}\n\n"
                 f"Respond with a JSON object with keys: matched (boolean), confidence (float 0-1), reason (string)"
             )
-            
+
             # Call the OpenAI API using the shared session
             response = self.session.post(
                 self.base_url,
@@ -125,17 +310,23 @@ class OpenAIEvaluator(LLMEvaluator):
                 try:
                     evaluation = json.loads(content)
                     matched = bool(evaluation.get("matched", False))
-                    confidence = float(evaluation.get("confidence", 0.0))
+                    confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
                     
                     # Add additional info to the result
                     evaluation["model"] = self.model
                     evaluation["api_status"] = "success"
-                    evaluation["evaluator_type"] = "openai"
+                    evaluation["evaluator_type"] = self.evaluator_type
                     evaluation["temperature"] = temperature  # Include the temperature used
 
+                    # Cache the successful response
+                    _cache_response(prompt_template, text, cache_model, temperature, matched, confidence, evaluation)
+
                     return matched, confidence, evaluation
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse LLM response: {content}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"[{self.log_label}] Failed to parse LLM response as JSON.")
+                    logger.error(f"[{self.log_label}] JSON error: {e}")
+                    logger.error(f"[{self.log_label}] Content type: {type(content)}, length: {len(content) if content else 0}")
+                    logger.error(f"[{self.log_label}] Raw content: {repr(content[:1000]) if content else 'EMPTY'}")
                     return False, 0.0, {"error": "Invalid response format", "raw_content": content}
             else:
                 error_msg = f"API error: {response.status_code}, {response.text}"
@@ -150,76 +341,274 @@ class OpenAIEvaluator(LLMEvaluator):
         except Exception as e:
             error_msg = f"Error in LLM evaluation: {str(e)}"
             logger.error(error_msg)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False, 0.0, {"error": error_msg}
+
+
+class OpenRouterEvaluator(OpenAIEvaluator):
+    """
+    LLM evaluator using OpenRouter's OpenAI-compatible chat completions API.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "openai/gpt-5.2"):
+        """
+        Initialize the OpenRouter evaluator with API credentials.
+
+        Args:
+            api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY environment variable)
+            model: OpenRouter model slug to use
+        """
+        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+        self.model = model
+        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.session = _get_shared_session()
+        self.evaluator_type = "openrouter"
+        self.log_label = "OpenRouter"
+
+        if not self.api_key:
+            logger.warning("No API key provided for OpenRouter LLM evaluator. Set OPENROUTER_API_KEY environment variable or pass api_key.")
 
 
 class GroqEvaluator(LLMEvaluator):
     """
     LLM evaluator using Groq Cloud API.
-    Evaluates prompts using various Groq models.
+    Evaluates prompts using various Groq models including safety models.
+    Supports both SDK and REST API modes.
     """
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "llama-3.3-70b-versatile"):
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "llama-3.3-70b-versatile",
+                 use_sdk: bool = True, reasoning_effort: str = "medium"):
         """
         Initialize the LLM evaluator with API credentials.
-        
+
         Args:
             api_key: Groq API key (defaults to GROQ_API_KEY environment variable)
             model: Groq model to use (defaults to llama-3.3-70b-versatile)
+                   For safety model use: "openai/gpt-oss-safeguard-20b"
+            use_sdk: Use official Groq SDK (True) or raw requests (False)
+            reasoning_effort: Reasoning effort for compatible models ("low", "medium", "high")
         """
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.model = model
+        self.use_sdk = use_sdk
+        self.reasoning_effort = reasoning_effort
         self.base_url = "https://api.groq.com/openai/v1/chat/completions"
-        self.session = _SHARED_SESSION  # Use shared session for connection reuse
-        
+        self.session = _get_shared_session()  # Use shared session for connection reuse
+        self.client = None
+
         # Validate API key
         if not self.api_key:
             logger.warning("No API key provided for Groq LLM evaluator. Set GROQ_API_KEY environment variable or pass api_key.")
-    
+
+        # Initialize Groq SDK if requested
+        if use_sdk and self.api_key:
+            try:
+                from groq import Groq
+                self.client = Groq(api_key=self.api_key)
+            except ImportError:
+                logger.warning("Groq SDK not installed. Falling back to REST API. Install with: pip install groq")
+                self.use_sdk = False
+
     def evaluate(self, pattern: str, text: str) -> Union[bool, Tuple[bool, float]]:
         """
         Basic evaluate implementation for the BaseEvaluator interface.
-        
+
         Args:
             pattern: The pattern to evaluate
             text: The text to check
-            
+
         Returns:
             Boolean indicating match or tuple of (matched, confidence)
         """
         matched, confidence, _ = self.evaluate_prompt(pattern, text)
         return matched, confidence
-    
+
     def evaluate_prompt(self, prompt_template: str, text: str, temperature: float = 0.1) -> Tuple[bool, float, Dict[str, Any]]:
         """
         Evaluate a text using the provided prompt template with Groq API.
-        
+
         Args:
             prompt_template: The prompt to send to the LLM
             text: The text to evaluate
             temperature: Temperature setting for the model (0.0-2.0), note that 0 gets converted to 1e-8
-            
+
         Returns:
             Tuple of (matched, confidence, details)
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str) or not text.strip():
+            return False, 0.0, {"error": "Invalid or empty text"}
+
         if not self.api_key:
-            # No API key available
             return False, 0.0, {"error": "No API key available"}
-        
+
+        # Use SDK method if available
+        if self.use_sdk and self.client:
+            return self._evaluate_with_sdk(prompt_template, text, temperature)
+        else:
+            return self._evaluate_with_rest(prompt_template, text, temperature)
+
+    def _evaluate_with_sdk(self, prompt_template: str, text: str, temperature: float) -> Tuple[bool, float, Dict[str, Any]]:
+        """Evaluate using the official Groq SDK with streaming support."""
+        # Ensure temperature is within valid range
+        if temperature == 0:
+            temperature = 1e-8
+        elif temperature > 2.0:
+            temperature = 2.0
+
+        # Check cache first after provider-specific normalization.
+        cache_model = f"groq:{self.model}:reasoning={self.reasoning_effort}"
+        cached = _get_cached_response(prompt_template, text, cache_model, temperature)
+        if cached is not None:
+            return cached
+
+        try:
+            # Format the complete prompt with clear structure for JSON output
+            full_prompt = (
+                f"## Evaluation Criteria\n{prompt_template}\n\n"
+                f"## Text to Evaluate\n{text}\n\n"
+                f"## Required Response Format\n"
+                f"You MUST respond with ONLY a valid JSON object (no markdown, no explanation):\n"
+                f'{{"matched": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}}'
+            )
+
+            # Build request parameters - aligned with REST method for consistency
+            request_params = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a security evaluation assistant. Your task is to analyze text against "
+                            "specific criteria and determine if it matches.\n\n"
+                            "CRITICAL: You MUST respond with ONLY a valid JSON object. No markdown formatting, "
+                            "no code blocks, no explanation text - just the raw JSON.\n\n"
+                            "Response format: {\"matched\": boolean, \"confidence\": float 0-1, \"reason\": string}"
+                        )
+                    },
+                    {"role": "user", "content": full_prompt}
+                ],
+                "temperature": temperature,
+                "max_completion_tokens": 4096,
+                "top_p": 1,
+                "stream": False,
+                "response_format": {"type": "json_object"},
+            }
+
+            # Add reasoning_effort for compatible models (like safeguard model)
+            if "safeguard" in self.model or "gpt-oss" in self.model:
+                request_params["reasoning_effort"] = self.reasoning_effort
+
+            # Call the Groq API using SDK
+            completion = self.client.chat.completions.create(**request_params)
+
+            # Process the response
+            content = completion.choices[0].message.content
+
+            # Defensive null check before parsing
+            if not content or not content.strip():
+                logger.error("[Groq SDK] Empty response from API")
+                logger.error(f"[Groq SDK] Full completion object: {completion}")
+                return False, 0.0, {"error": "Empty response from API"}
+
+            # Parse the JSON response
+            try:
+                evaluation = json.loads(content)
+                matched = bool(evaluation.get("matched", False))
+                confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
+
+                # Add additional info to the result
+                evaluation["model"] = self.model
+                evaluation["api_status"] = "success"
+                evaluation["evaluator_type"] = "groq"
+                evaluation["temperature"] = temperature
+                evaluation["reasoning_effort"] = self.reasoning_effort
+
+                # Cache the successful response
+                _cache_response(prompt_template, text, cache_model, temperature, matched, confidence, evaluation)
+
+                return matched, confidence, evaluation
+            except json.JSONDecodeError:
+                # Try to extract JSON from response if wrapped in text
+                json_match = re.search(r'\{[^{}]*\}', content)
+                if json_match:
+                    try:
+                        evaluation = json.loads(json_match.group())
+                        matched = bool(evaluation.get("matched", False))
+                        confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
+                        evaluation["model"] = self.model
+                        evaluation["api_status"] = "success"
+                        evaluation["evaluator_type"] = "groq"
+
+                        # Cache extracted response too
+                        _cache_response(prompt_template, text, cache_model, temperature, matched, confidence, evaluation)
+
+                        return matched, confidence, evaluation
+                    except json.JSONDecodeError:
+                        pass
+                logger.error("[Groq SDK] Failed to parse LLM response as JSON.")
+                logger.error(f"[Groq SDK] Content type: {type(content)}, length: {len(content) if content else 0}")
+                logger.error(f"[Groq SDK] Raw content: {repr(content[:1000]) if content else 'EMPTY'}")
+                return False, 0.0, {"error": "Invalid response format", "raw_content": content}
+
+        except Exception as e:
+            error_msg = f"Error in Groq SDK evaluation: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+            logger.error(f"[Groq SDK] Traceback: {traceback.format_exc()}")
+            return False, 0.0, {"error": error_msg}
+
+    def _evaluate_with_rest(self, prompt_template: str, text: str, temperature: float) -> Tuple[bool, float, Dict[str, Any]]:
+        """Evaluate using REST API (fallback method)."""
         # Ensure temperature is within valid range and not exactly 0 (Groq converts 0 to 1e-8)
         if temperature == 0:
             temperature = 1e-8
         elif temperature > 2.0:
             temperature = 2.0
-            
+
+        # Check cache first after provider-specific normalization.
+        cache_model = f"groq:{self.model}:reasoning={self.reasoning_effort}"
+        cached = _get_cached_response(prompt_template, text, cache_model, temperature)
+        if cached is not None:
+            return cached
+
         try:
-            # Format the complete prompt
+            # Format the complete prompt with clear structure for JSON output
             full_prompt = (
-                f"{prompt_template}\n\n"
-                f"Text to evaluate: {text}\n\n"
-                f"Respond with a JSON object with keys: matched (boolean), confidence (float 0-1), reason (string)"
+                f"## Evaluation Criteria\n{prompt_template}\n\n"
+                f"## Text to Evaluate\n{text}\n\n"
+                f"## Required Response Format\n"
+                f"You MUST respond with ONLY a valid JSON object (no markdown, no explanation):\n"
+                f'{{"matched": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}}'
             )
-            
+
+            # Build request JSON
+            request_json = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a security evaluation assistant. Your task is to analyze text against "
+                            "specific criteria and determine if it matches.\n\n"
+                            "CRITICAL: You MUST respond with ONLY a valid JSON object. No markdown formatting, "
+                            "no code blocks, no explanation text - just the raw JSON.\n\n"
+                            "Response format: {\"matched\": boolean, \"confidence\": float 0-1, \"reason\": string}"
+                        )
+                    },
+                    {"role": "user", "content": full_prompt}
+                ],
+                "temperature": temperature,
+                "max_completion_tokens": 4096,
+                "top_p": 1,
+                "response_format": {"type": "json_object"}
+            }
+
+            # Add reasoning_effort for compatible models
+            if "safeguard" in self.model or "gpt-oss" in self.model:
+                request_json["reasoning_effort"] = self.reasoning_effort
+
             # Call the Groq API using the shared session
             response = self.session.post(
                 self.base_url,
@@ -227,57 +616,68 @@ class GroqEvaluator(LLMEvaluator):
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json"
                 },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "system", 
-                            "content": "You are a helpful assistant that evaluates text based on the given criteria. "
-                                      "Respond with a JSON object containing 'matched' (boolean), 'confidence' (float 0-1), "
-                                      "and 'reason' (string)."
-                        },
-                        {"role": "user", "content": full_prompt}
-                    ],
-                    "temperature": temperature,  # Use the provided temperature
-                    "response_format": {"type": "json_object"}
-                },
-                timeout=10  # Add timeout for network operations
+                json=request_json,
+                timeout=60  # Increased timeout for reasoning models
             )
-            
+
             # Process the response
             if response.status_code == 200:
                 result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-                
+
+                # Debug: log the full response structure for troubleshooting
+                if not result.get("choices"):
+                    logger.error(f"Groq API returned no choices. Full response: {result}")
+                    return False, 0.0, {"error": "No choices in response", "raw_response": str(result)[:500]}
+
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                # Handle empty content
+                if not content or not content.strip():
+                    logger.error(f"Groq API returned empty content. Full response: {result}")
+                    return False, 0.0, {"error": "Empty content in response", "raw_response": str(result)[:500]}
+
+                # Debug: log raw content before parsing
+                logger.debug(f"[Groq REST] Raw LLM content (first 500 chars): {repr(content[:500])}")
+
                 # Parse the JSON response
                 try:
                     evaluation = json.loads(content)
                     matched = bool(evaluation.get("matched", False))
-                    confidence = float(evaluation.get("confidence", 0.0))
-                    
+                    confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
+
                     # Add additional info to the result
                     evaluation["model"] = self.model
                     evaluation["api_status"] = "success"
                     evaluation["evaluator_type"] = "groq"
-                    evaluation["temperature"] = temperature  # Include the temperature used
+                    evaluation["temperature"] = temperature
+
+                    # Cache the successful response
+                    _cache_response(prompt_template, text, cache_model, temperature, matched, confidence, evaluation)
 
                     return matched, confidence, evaluation
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse LLM response: {content}")
-                    return False, 0.0, {"error": "Invalid response format", "raw_content": content}
+                except json.JSONDecodeError as e:
+                    logger.error("[Groq REST] Failed to parse LLM response as JSON.")
+                    logger.error(f"[Groq REST] JSON error: {e}")
+                    logger.error(f"[Groq REST] Content type: {type(content)}, length: {len(content) if content else 0}")
+                    logger.error(f"[Groq REST] Raw content: {repr(content[:1000]) if content else 'EMPTY'}")
+                    logger.error(f"[Groq REST] Full API response: {result}")
+                    return False, 0.0, {"error": "Invalid JSON format", "raw_content": content[:500]}
             else:
-                error_msg = f"API error: {response.status_code}, {response.text}"
+                error_msg = f"[Groq REST] API error: {response.status_code}"
                 logger.error(error_msg)
+                logger.error(f"[Groq REST] Response body: {response.text[:1000]}")
                 return False, 0.0, {"error": error_msg, "status_code": response.status_code}
 
         except requests.Timeout:
-            error_msg = "API request timed out"
+            error_msg = "[Groq REST] API request timed out after 60s"
             logger.error(error_msg)
             return False, 0.0, {"error": error_msg}
 
         except Exception as e:
-            error_msg = f"Error in LLM evaluation: {str(e)}"
+            error_msg = f"[Groq REST] Error in LLM evaluation: {str(e)}"
             logger.error(error_msg)
+            import traceback
+            logger.error(f"[Groq REST] Traceback: {traceback.format_exc()}")
             return False, 0.0, {"error": error_msg}
 
 
@@ -298,7 +698,7 @@ class AnthropicEvaluator(LLMEvaluator):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.model = model
         self.base_url = "https://api.anthropic.com/v1/messages"
-        self.session = _SHARED_SESSION  # Use shared session for connection reuse
+        self.session = _get_shared_session()  # Use shared session for connection reuse
         
         # Validate API key
         if not self.api_key:
@@ -321,19 +721,23 @@ class AnthropicEvaluator(LLMEvaluator):
     def evaluate_prompt(self, prompt_template: str, text: str, temperature: float = 0.1) -> Tuple[bool, float, Dict[str, Any]]:
         """
         Evaluate a text using the provided prompt template with Anthropic API.
-        
+
         Args:
             prompt_template: The prompt to send to the LLM
             text: The text to evaluate
             temperature: Temperature setting for the model (0.0-1.0)
-            
+
         Returns:
             Tuple of (matched, confidence, details)
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str) or not text.strip():
+            return False, 0.0, {"error": "Invalid or empty text"}
+
         if not self.api_key:
             # No API key available
             return False, 0.0, {"error": "No API key available"}
-        
+
         try:
             # Format the complete prompt
             system_prompt = (
@@ -341,7 +745,7 @@ class AnthropicEvaluator(LLMEvaluator):
                 "Respond with a JSON object containing 'matched' (boolean), "
                 "'confidence' (float 0-1), and 'reason' (string)."
             )
-            
+
             user_prompt = (
                 f"{prompt_template}\n\n"
                 f"Text to evaluate: {text}\n\n"
@@ -383,7 +787,7 @@ class AnthropicEvaluator(LLMEvaluator):
                         json_content = content[json_start:json_end]
                         evaluation = json.loads(json_content)
                         matched = bool(evaluation.get("matched", False))
-                        confidence = float(evaluation.get("confidence", 0.0))
+                        confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
                         
                         # Add additional info to the result
                         evaluation["model"] = self.model
@@ -394,22 +798,28 @@ class AnthropicEvaluator(LLMEvaluator):
                         return matched, confidence, evaluation
                     else:
                         return False, 0.0, {"error": "No JSON found in response", "raw_content": content}
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse Claude response: {content}")
+                except json.JSONDecodeError as e:
+                    logger.error("[Anthropic] Failed to parse Claude response as JSON.")
+                    logger.error(f"[Anthropic] JSON error: {e}")
+                    logger.error(f"[Anthropic] Content type: {type(content)}, length: {len(content) if content else 0}")
+                    logger.error(f"[Anthropic] Raw content: {repr(content[:1000]) if content else 'EMPTY'}")
                     return False, 0.0, {"error": "Invalid response format", "raw_content": content}
             else:
-                error_msg = f"API error: {response.status_code}, {response.text}"
+                error_msg = f"[Anthropic] API error: {response.status_code}"
                 logger.error(error_msg)
+                logger.error(f"[Anthropic] Response body: {response.text[:1000]}")
                 return False, 0.0, {"error": error_msg, "status_code": response.status_code}
 
         except requests.Timeout:
-            error_msg = "API request timed out"
+            error_msg = "[Anthropic] API request timed out"
             logger.error(error_msg)
             return False, 0.0, {"error": error_msg}
 
         except Exception as e:
-            error_msg = f"Error in LLM evaluation: {str(e)}"
+            error_msg = f"[Anthropic] Error in LLM evaluation: {str(e)}"
             logger.error(error_msg)
+            import traceback
+            logger.error(f"[Anthropic] Traceback: {traceback.format_exc()}")
             return False, 0.0, {"error": error_msg}
 
 
@@ -440,7 +850,7 @@ class AzureOpenAIEvaluator(OpenAIEvaluator):
         self.endpoint = endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT")
         self.deployment_name = deployment_name
         self.api_version = api_version
-        self.session = _SHARED_SESSION  # Use shared session for connection reuse
+        self.session = _get_shared_session()  # Use shared session for connection reuse
         
         # Validate configuration
         if not self.api_key:
@@ -460,19 +870,23 @@ class AzureOpenAIEvaluator(OpenAIEvaluator):
     def evaluate_prompt(self, prompt_template: str, text: str, temperature: float = 0.1) -> Tuple[bool, float, Dict[str, Any]]:
         """
         Evaluate a text using the provided prompt template with Azure OpenAI API.
-        
+
         Args:
             prompt_template: The prompt to send to the LLM
             text: The text to evaluate
             temperature: Temperature setting for the model (0.0-1.0)
-            
+
         Returns:
             Tuple of (matched, confidence, details)
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str) or not text.strip():
+            return False, 0.0, {"error": "Invalid or empty text"}
+
         if not self.api_key or not self.base_url:
             # Missing configuration
             return False, 0.0, {"error": "Missing Azure OpenAI configuration"}
-        
+
         try:
             # Format the complete prompt
             full_prompt = (
@@ -480,7 +894,7 @@ class AzureOpenAIEvaluator(OpenAIEvaluator):
                 f"Text to evaluate: {text}\n\n"
                 f"Respond with a JSON object with keys: matched (boolean), confidence (float 0-1), reason (string)"
             )
-            
+
             # Call the Azure OpenAI API using the shared session
             response = self.session.post(
                 self.base_url,
@@ -513,7 +927,7 @@ class AzureOpenAIEvaluator(OpenAIEvaluator):
                 try:
                     evaluation = json.loads(content)
                     matched = bool(evaluation.get("matched", False))
-                    confidence = float(evaluation.get("confidence", 0.0))
+                    confidence = max(0.0, min(1.0, float(evaluation.get("confidence", 0.0))))
                     
                     # Add additional info to the result
                     evaluation["model"] = self.deployment_name
@@ -522,17 +936,23 @@ class AzureOpenAIEvaluator(OpenAIEvaluator):
                     evaluation["temperature"] = temperature  # Include the temperature used
                     
                     return matched, confidence, evaluation
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse Azure OpenAI response: {content}")
+                except json.JSONDecodeError as e:
+                    logger.error("[Azure] Failed to parse Azure OpenAI response as JSON.")
+                    logger.error(f"[Azure] JSON error: {e}")
+                    logger.error(f"[Azure] Content type: {type(content)}, length: {len(content) if content else 0}")
+                    logger.error(f"[Azure] Raw content: {repr(content[:1000]) if content else 'EMPTY'}")
                     return False, 0.0, {"error": "Invalid response format", "raw_content": content}
             else:
-                error_msg = f"API error: {response.status_code}, {response.text}"
+                error_msg = f"[Azure] API error: {response.status_code}"
                 logger.error(error_msg)
+                logger.error(f"[Azure] Response body: {response.text[:1000]}")
                 return False, 0.0, {"error": error_msg, "status_code": response.status_code}
 
         except Exception as e:
-            error_msg = f"Error in Azure OpenAI evaluation: {str(e)}"
+            error_msg = f"[Azure] Error in Azure OpenAI evaluation: {str(e)}"
             logger.error(error_msg)
+            import traceback
+            logger.error(f"[Azure] Traceback: {traceback.format_exc()}")
             return False, 0.0, {"error": error_msg}
 
 
@@ -560,7 +980,7 @@ class OllamaEvaluator(LLMEvaluator):
         self.model = model
         self.timeout = timeout
         self.debug = debug
-        self.session = _SHARED_SESSION  # Use shared session for connection reuse
+        self.session = _get_shared_session()  # Use shared session for connection reuse
         
         # Remove trailing slash if present
         self.host = self.host.rstrip('/')
@@ -586,21 +1006,17 @@ class OllamaEvaluator(LLMEvaluator):
     
     def _debug_print(self, message, data=None):
         """Print debug information if debug mode is enabled."""
-        if self.debug:
-            #print(f"[OLLAMA DEBUG] {message}")
-            if data is not None:
-                if isinstance(data, str) and len(data) > 500:
-                    # For long strings, print a summary
-                    #print(f"[OLLAMA DEBUG] Content (first 200 chars): {data[:200]}")
-                    #print(f"[OLLAMA DEBUG] Content (last 200 chars): {data[-200:]}")
-                    #print(f"[OLLAMA DEBUG] Content length: {len(data)}")
-                    # Print line by line for the first few lines to see structure
-                    lines = data.split('\n')
-                    #for i, line in enumerate(lines[:5]):
-                        #print(f"[OLLAMA DEBUG] Line {i+1} ({len(line)} chars): {line}")
-                #else:
-                #    print(f"[OLLAMA DEBUG] {data}")
-                pass
+        if not self.debug:
+            return
+
+        logger.debug("[Ollama] %s", message)
+        if data is None:
+            return
+
+        if isinstance(data, str) and len(data) > 500:
+            logger.debug("[Ollama] Data preview: %s...%s", data[:200], data[-200:])
+        else:
+            logger.debug("[Ollama] Data: %r", data)
     
     def _extract_response_from_streaming_json(self, response_text):
         """
@@ -673,7 +1089,7 @@ class OllamaEvaluator(LLMEvaluator):
                 if confidence < 0 or confidence > 1:
                     confidence = max(0, min(confidence, 1))  # Clamp to 0-1 range
                 self._debug_print(f"Found confidence = {confidence}")
-            except:
+            except ValueError:
                 pass
         
         if reason_match:
@@ -692,15 +1108,19 @@ class OllamaEvaluator(LLMEvaluator):
     def evaluate_prompt(self, prompt_template: str, text: str, temperature: float = 0.1) -> Tuple[bool, float, Dict[str, Any]]:
         """
         Evaluate a text using the provided prompt template with Ollama API.
-        
+
         Args:
             prompt_template: The prompt to send to the LLM
             text: The text to evaluate
             temperature: Temperature setting for the model (0.0-1.0)
-            
+
         Returns:
             Tuple of (matched, confidence, details)
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str) or not text.strip():
+            return False, 0.0, {"error": "Invalid or empty text"}
+
         try:
             # Format the complete prompt
             system_prompt = (
@@ -710,7 +1130,7 @@ class OllamaEvaluator(LLMEvaluator):
                 "Format your response as a JSON object and nothing else. "
                 "Do not add any explanation before or after the JSON."
             )
-            
+
             user_prompt = (
                 f"{prompt_template}\n\n"
                 f"Text to evaluate: {text}\n\n"
@@ -844,7 +1264,7 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
     If the requested evaluator can't be created, raises an exception.
     
     Args:
-        llm_type: Type of LLM evaluator ('openai', 'anthropic', 'azure', 'ollama', or 'groq')
+        llm_type: Type of LLM evaluator ('openai', 'anthropic', 'azure', 'ollama', 'groq', or 'openrouter')
         model: Optional model name to use
         verbose: Whether to print verbose information
         
@@ -861,7 +1281,7 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
     if llm_type.lower() == 'anthropic':
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if api_key:
-            selected_model = model or "claude-3-sonnet-20240229"
+            selected_model = _select_model("anthropic", model, "claude-3-sonnet-20240229")
             if verbose:
                 logger.info(f"✓ Using Anthropic evaluator with model: {selected_model}")
             return AnthropicEvaluator(api_key=api_key, model=selected_model)
@@ -872,7 +1292,7 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
         api_key = os.environ.get("AZURE_OPENAI_API_KEY")
         endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
         if api_key and endpoint:
-            deployment = model or "gpt-35-turbo"
+            deployment = _select_model("azure", model, "gpt-35-turbo")
             if verbose:
                 logger.info(f"✓ Using Azure OpenAI evaluator with deployment: {deployment}")
             return AzureOpenAIEvaluator(api_key=api_key, endpoint=endpoint, deployment_name=deployment)
@@ -886,7 +1306,7 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
     
     elif llm_type.lower() == 'ollama':
         host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        selected_model = model or "llama3"
+        selected_model = _select_model("ollama", model, "llama3")
         try:
             # Try a simple ping to see if Ollama is running
             requests.get(f"{host}/api/tags", timeout=2)
@@ -899,23 +1319,33 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
     elif llm_type.lower() == 'groq':
         api_key = os.environ.get("GROQ_API_KEY")
         if api_key:
-            selected_model = model or "llama-3.3-70b-versatile"
+            selected_model = _select_model("groq", model, "llama-3.3-70b-versatile")
             if verbose:
                 logger.info(f"✓ Using Groq evaluator with model: {selected_model}")
-            return GroqEvaluator(api_key=api_key, model=selected_model)
+            return GroqEvaluator(api_key=api_key, model=selected_model, use_sdk=True)
         else:
             raise ValueError("GROQ_API_KEY not set in environment variables. Cannot use Groq evaluator.")
     
     elif llm_type.lower() == 'openai':
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key:
-            selected_model = model or "gpt-4o-mini"
+            selected_model = _select_model("openai", model, "gpt-4o-mini")
             if verbose:
                 logger.info(f"✓ Using OpenAI evaluator with model: {selected_model}")
             return OpenAIEvaluator(api_key=api_key, model=selected_model)
         else:
             raise ValueError("OPENAI_API_KEY not set in environment variables. Cannot use OpenAI evaluator.")
+
+    elif llm_type.lower() == 'openrouter':
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if api_key:
+            selected_model = _select_model("openrouter", model, "openai/gpt-5.2")
+            if verbose:
+                logger.info(f"✓ Using OpenRouter evaluator with model: {selected_model}")
+            return OpenRouterEvaluator(api_key=api_key, model=selected_model)
+        else:
+            raise ValueError("OPENROUTER_API_KEY not set in environment variables. Cannot use OpenRouter evaluator.")
     
     else:
         # Invalid LLM type
-        raise ValueError(f"Unsupported LLM type: {llm_type}. Supported types are: openai, anthropic, azure, ollama, groq")
+        raise ValueError(f"Unsupported LLM type: {llm_type}. Supported types are: openai, anthropic, azure, ollama, groq, openrouter")

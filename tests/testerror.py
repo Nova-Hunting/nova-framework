@@ -3,19 +3,16 @@
 NOVA: Error Handling Test Suite
 Author: Claude
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: A comprehensive test suite to verify error handling in Nova rule system
 """
 
-import os
 import sys
-import re
 import json
 import time
-from typing import Dict, List, Any, Tuple, Optional, Set
 
 
-from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern
+from nova.core.rules import NovaRule, KeywordPattern
 from nova.core.parser import NovaParser, NovaRuleFileParser
 from nova.core.matcher import NovaMatcher
 from nova.evaluators.condition import evaluate_condition
@@ -232,7 +229,7 @@ class NovaErrorTests:
         """
         try:
             # This might be allowed by some parsers with a warning
-            rule = self.parser.parse(undefined_vars_rule)
+            self.parser.parse(undefined_vars_rule)
             self._log_test("Undefined Variables Handling", 
                           True, 
                           "Parser allowed undefined variables but should warn about them")
@@ -593,7 +590,7 @@ class NovaErrorTests:
         
         start_time = time.time()
         try:
-            result = evaluate_condition(many_vars_condition, many_vars_matches, {}, {})
+            evaluate_condition(many_vars_condition, many_vars_matches, {}, {})
             end_time = time.time()
             duration = end_time - start_time
             
@@ -615,7 +612,7 @@ class NovaErrorTests:
         
         start_time = time.time()
         try:
-            result = evaluate_condition(nested_condition, nested_matches, {}, {})
+            evaluate_condition(nested_condition, nested_matches, {}, {})
             end_time = time.time()
             duration = end_time - start_time
             
@@ -633,7 +630,7 @@ class NovaErrorTests:
         
         start_time = time.time()
         try:
-            result = evaluate_condition(wildcards_condition, wildcards_matches, {}, {})
+            evaluate_condition(wildcards_condition, wildcards_matches, {}, {})
             end_time = time.time()
             duration = end_time - start_time
             

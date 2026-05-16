@@ -3,7 +3,7 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia 
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Configuration utilities for Nova framework
 """
 
@@ -29,6 +29,7 @@ class NovaConfig:
             config_path: Path to config file (optional)
         """
         self.config = {}
+        self.file_config = {}
         self.config_path = config_path
         
         # Load configuration
@@ -55,7 +56,7 @@ class NovaConfig:
         
         # Load from config file if available
         if self.config_path:
-            self._load_from_file(self.config_path)
+            self._load_from_file(self.config_path, required=True)
         else:
             # Try default paths
             for path in self.DEFAULT_CONFIG_PATHS:
@@ -66,21 +67,29 @@ class NovaConfig:
         # Override with environment variables
         self._load_from_env()
     
-    def _load_from_file(self, path: str):
+    def _load_from_file(self, path: str, required: bool = False):
         """Load configuration from file."""
         try:
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"Config file not found: {path}")
+
             if path.endswith('.json'):
                 with open(path, 'r') as f:
                     file_config = json.load(f)
-                    self._merge_config(file_config)
+                if not isinstance(file_config, dict):
+                    raise ValueError("JSON config root must be an object")
             else:
                 # Assume INI format
                 parser = configparser.ConfigParser()
-                parser.read(path)
+                loaded_files = parser.read(path)
+                if not loaded_files:
+                    raise FileNotFoundError(f"Config file not found or unreadable: {path}")
+
+                file_config = {}
                 
                 for section in parser.sections():
-                    if section not in self.config:
-                        self.config[section] = {}
+                    if section not in file_config:
+                        file_config[section] = {}
                     
                     for key, value in parser.items(section):
                         # Convert types
@@ -92,9 +101,13 @@ class NovaConfig:
                             value = int(value)
                         elif value.replace('.', '', 1).isdigit() and value.count('.') == 1:
                             value = float(value)
-                        
-                        self.config[section][key] = value
+                        file_config[section][key] = value
+
+            self.file_config = file_config
+            self._merge_config(file_config)
         except Exception as e:
+            if required:
+                raise ValueError(f"Failed to load config from {path}: {e}") from e
             print(f"Error loading config from {path}: {e}")
     
     def _load_from_env(self):
@@ -105,9 +118,15 @@ class NovaConfig:
         
         if os.environ.get("NOVA_LLM_MODEL"):
             self.config["llm"]["model"] = os.environ["NOVA_LLM_MODEL"]
+
+        if os.environ.get("AZURE_OPENAI_ENDPOINT"):
+            self.config["llm"]["endpoint"] = os.environ["AZURE_OPENAI_ENDPOINT"]
+
+        if os.environ.get("OLLAMA_HOST"):
+            self.config["llm"]["host"] = os.environ["OLLAMA_HOST"]
         
         # API keys
-        for provider in ["OPENAI", "ANTHROPIC", "AZURE_OPENAI"]:
+        for provider in ["OPENAI", "ANTHROPIC", "AZURE_OPENAI", "GROQ", "OPENROUTER"]:
             env_var = f"{provider}_API_KEY"
             if os.environ.get(env_var):
                 if "api_keys" not in self.config:
@@ -155,6 +174,20 @@ class NovaConfig:
             Dictionary of section values or empty dict if section not found
         """
         return self.config.get(section, {})
+
+    def get_file_value(self, section: str, key: str, default: Any = None) -> Any:
+        """
+        Get a value that was explicitly provided by the loaded config file.
+
+        Environment values and built-in defaults are intentionally excluded.
+        This is useful for callers that need to preserve environment/provider
+        precedence instead of treating defaults as explicit user choices.
+        """
+        values = self.file_config.get(section, {})
+        if not isinstance(values, dict):
+            return default
+
+        return values.get(key, default)
     
     def set(self, section: str, key: str, value: Any):
         """
@@ -183,7 +216,9 @@ class NovaConfig:
         
         try:
             # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            save_dir = os.path.dirname(save_path)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
             
             if save_path.endswith('.json'):
                 with open(save_path, 'w') as f:
@@ -207,7 +242,7 @@ class NovaConfig:
             print(f"Configuration saved to {save_path}")
             
         except Exception as e:
-            print(f"Error saving config to {save_path}: {e}")
+            raise ValueError(f"Failed to save config to {save_path}: {e}") from e
     
     def __str__(self) -> str:
         """String representation of configuration."""

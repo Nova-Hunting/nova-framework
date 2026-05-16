@@ -3,11 +3,10 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia 
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Test suite for Nova framework
 """
 
-import os
 import argparse
 from nova.core.parser import NovaParser
 from nova.core.matcher import NovaMatcher
@@ -315,7 +314,7 @@ def run_simplified_tests(verbose=False):
     results.append(run_test(test11_rule, test11_prompt_2, True, "Case Sensitive Match - Proper Case", verbose))
     
     # Test 12: Regex Pattern Matching
-    test12_rule = """rule RegexPatternMatch
+    test12_rule = r"""rule RegexPatternMatch
     {
         meta:
             description = "Tests regex pattern matching"
@@ -337,7 +336,7 @@ def run_simplified_tests(verbose=False):
     results.append(run_test(test12_rule, test12_prompt_2, True, "Regex Pattern Match - IP Address", verbose))
     
     # Test 13: Case Sensitive Regex
-    test13_rule = """rule CaseSensitiveRegex
+    test13_rule = r"""rule CaseSensitiveRegex
     {
         meta:
             description = "Tests case sensitive regex"
@@ -360,7 +359,7 @@ def run_simplified_tests(verbose=False):
     # Summarize test results
     passed = sum(results)
     total = len(results)
-    print(f"\n=== Test Summary ===")
+    print("\n=== Test Summary ===")
     print(f"Passed: {passed}/{total} tests ({passed/total*100:.0f}%)")
 
 

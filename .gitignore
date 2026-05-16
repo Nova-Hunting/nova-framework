@@ -10,4 +10,4 @@ wheels/
 optimized_matcher.py
 optimized_test.py
 # Pytest cache
-tests/
+.pytest_cache/

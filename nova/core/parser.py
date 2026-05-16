@@ -3,12 +3,12 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
-Description: Temporary patched version of NovaParser that disables strict validation for wildcards
+Version: see nova._version
+Description: Nova rule parser with grammar validation
 """
 
 import re
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Set
 from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern
 from nova.utils.logger import get_logger
 
@@ -17,16 +17,19 @@ logger = get_logger("nova.parser")
 
 # Precompile regex patterns for better performance
 RULE_NAME_PATTERN = re.compile(r'rule\s+(\w+)(?:\s*{)?')
-RULE_START_PATTERN = re.compile(r'rule\s+\w+\s*{?')
+RULE_START_PATTERN = re.compile(r'^\s*rule\s+\w+\s*{?', re.MULTILINE)
 SECTION_WILDCARD_PATTERN = re.compile(r'(keywords|semantics|llm)\.\*')
 VAR_PREFIX_PATTERN = re.compile(r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)\*')
-ANY_OF_WILDCARD_PATTERN = re.compile(r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)')
-DIRECT_VAR_PATTERN = re.compile(r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)')
-STANDALONE_VAR_PATTERN = re.compile(r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)')
+QUANTIFIED_PREFIX_WILDCARD_PATTERN = re.compile(r'(any|all|\d+)\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)', re.IGNORECASE)
+SECTION_QUANTIFIER_PATTERN = re.compile(r'\b(any|all|\d+)\s+of\s+(keywords|semantics|llm)(?:\.\*)?\b', re.IGNORECASE)
+DIRECT_VAR_PATTERN = re.compile(r'(keywords|semantics|llm)\.\$([a-zA-Z0-9_]+)(?![a-zA-Z0-9_]*\*)')
+STANDALONE_VAR_PATTERN = re.compile(r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)(?![a-zA-Z0-9_\*])')
+RAW_STANDALONE_WILDCARD_PATTERN = re.compile(r'(?<![a-zA-Z0-9_\.\$])\$[A-Za-z0-9_]+\*')
 NESTED_QUANTIFIERS_PATTERN = re.compile(r'\b(any|all|[0-9]+)\s+of\s+(any|all|[0-9]+)\s+of\b')
 SECTION_REF_PATTERN = re.compile(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\.\$')
 CONSECUTIVE_PARENS_PATTERN = re.compile(r'\)\s+\(')
 QUANTIFIER_WITHOUT_OF_PATTERN = re.compile(r'\b(any|all)\b(?!\s+of\b)')
+VARIABLE_NAME_PATTERN = re.compile(r'^\$[A-Za-z0-9_]+$')
 
 class NovaParserError(Exception):
     """Exception raised for Nova rule syntax errors."""
@@ -34,10 +37,7 @@ class NovaParserError(Exception):
 
 
 class NovaParser:
-    """
-    Parser for Nova rule files with grammar validation.
-    Patched to handle wildcard patterns in conditions.
-    """
+    """Parser for Nova rule files with grammar validation."""
     
     def __init__(self):
         """Initialize the parser."""
@@ -63,6 +63,7 @@ class NovaParser:
             NovaParserError: If the rule definition doesn't follow the grammar
         """
         lines = content.strip().split('\n')
+        rule_start_index = self._find_rule_start_index(lines)
         
         # Reset variable tracking
         self.variable_names = {
@@ -72,16 +73,16 @@ class NovaParser:
         }
         
         # Check rule declaration and extract name
-        rule_name = self._parse_rule_name(lines[0])
+        rule_name = self._parse_rule_name(lines[rule_start_index])
         self.rule = NovaRule(name=rule_name)
         
         current_section = None
         section_content = []
         
         # Parse rule content
-        for line in lines[1:]:
+        for line in lines[rule_start_index + 1:]:
             line = line.strip()
-            if not line or line.startswith('//'):
+            if self._is_comment_or_blank(line):
                 continue
                 
             if line.endswith(':'):
@@ -100,6 +101,20 @@ class NovaParser:
         self._validate_rule_structure()
         
         return self.rule
+
+    def _find_rule_start_index(self, lines: List[str]) -> int:
+        """Find the first rule declaration, skipping leading blank/comment lines."""
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if self._is_comment_or_blank(stripped):
+                continue
+            if RULE_NAME_PATTERN.match(stripped):
+                return index
+            raise NovaParserError(
+                f"Invalid rule declaration: '{stripped}'. Must follow format 'rule RuleName' or 'rule RuleName {{'"
+            )
+
+        raise NovaParserError("No rule declaration found")
     
     def _parse_rule_name(self, line: str) -> str:
         """Extract the rule name from the rule declaration line."""
@@ -109,6 +124,11 @@ class NovaParser:
                 f"Invalid rule declaration: '{line}'. Must follow format 'rule RuleName' or 'rule RuleName {{'"
             )
         return match.group(1)
+
+    def _is_comment_or_blank(self, line: str) -> bool:
+        """Return True for blank lines and supported whole-line comments."""
+        stripped = line.strip()
+        return not stripped or stripped.startswith('//') or stripped.startswith('#')
     
     def _parse_section(self, section: str, content: List[str]):
         """Parse a section of the rule definition."""
@@ -125,8 +145,10 @@ class NovaParser:
         elif section == "condition":
             self.rule.condition = self._parse_condition_section(content)
         else:
-            # Unknown sections are ignored with a warning
-            logger.warning(f"Unknown section '{section}' in rule '{self.rule.name}'")
+            expected = "meta, keywords, semantics, llm, condition"
+            raise NovaParserError(
+                f"Unknown section '{section}' in rule '{self.rule.name}'. Expected one of: {expected}"
+            )
     
     def _parse_meta_section(self, content: List[str]) -> Dict[str, str]:
         """Parse metadata from the meta section."""
@@ -134,7 +156,7 @@ class NovaParser:
         
         for line in content:
             line = line.strip()
-            if not line or line.startswith('//'):
+            if self._is_comment_or_blank(line):
                 continue
                 
             if '=' not in line:
@@ -161,14 +183,11 @@ class NovaParser:
         for line in content:
             line_num += 1
             line = line.strip()
-            if not line or line.startswith('//'):
+            if self._is_comment_or_blank(line):
                 continue
             
             # Check for equals sign
             if '=' not in line:
-                # Extract variable name for better error message
-                parts = line.split()
-                var_name = parts[0] if parts else "unknown"
                 raise NovaParserError(
                     f"Missing equals sign at line {line_num}: '{line}'. Format should be '$variable = \"pattern\"'")
             
@@ -176,9 +195,7 @@ class NovaParser:
             key = key.strip()
             
             # Check that variable name starts with $
-            if not key.startswith('$'):
-                raise NovaParserError(
-                    f"Invalid semantics variable at line {line_num}: '{key}'. Variable names must start with $")
+            self._validate_variable_name(key, "semantics", line_num)
             
             # Check for duplicate variable names
             if key in seen_variables:
@@ -192,30 +209,30 @@ class NovaParser:
             self.variable_names['semantics'].add(key)
             
             value = value.strip()
-            
-            # Check for pattern and optional threshold
-            pattern_parts = value.split('(')
-            pattern = pattern_parts[0].strip()
-            
-            # Extract pattern without quotes
-            if pattern.startswith('"') and pattern.endswith('"'):
-                pattern = pattern[1:-1]
-            else:
-                # Check if pattern is missing quotes
-                raise NovaParserError(
-                    f"Invalid semantics pattern at line {line_num}: '{pattern}'. Patterns must be in double quotes")
-            
-            # Parse threshold if provided
+
+            # Parse pattern and optional threshold using regex (handles parentheses in patterns)
+            # Matches: "pattern text"(threshold) or just "pattern text"
+            threshold_match = re.search(r'^"(.+)"\s*\(\s*([0-9.]+)\s*\)\s*$', value)
+            pattern_only_match = re.search(r'^"(.+)"\s*$', value)
+
             threshold = 0.1  # Default threshold
-            if len(pattern_parts) > 1:
-                threshold_part = pattern_parts[1].strip()
+
+            if threshold_match:
+                # Pattern with explicit threshold
+                pattern = threshold_match.group(1)
                 try:
-                    threshold = float(threshold_part.rstrip(') '))
+                    threshold = float(threshold_match.group(2))
                     if not 0 <= threshold <= 1:
                         raise ValueError("Threshold must be between 0.0 and 1.0")
                 except ValueError as e:
                     raise NovaParserError(
-                        f"Invalid semantics threshold at line {line_num}: '{threshold_part}'. {str(e)}")
+                        f"Invalid semantics threshold at line {line_num}: '{threshold_match.group(2)}'. {str(e)}")
+            elif pattern_only_match:
+                # Pattern without threshold
+                pattern = pattern_only_match.group(1)
+            else:
+                raise NovaParserError(
+                    f"Invalid semantics pattern at line {line_num}: '{value}'. Patterns must be in double quotes")
             
             result[key] = SemanticPattern(pattern=pattern, threshold=threshold)
             
@@ -230,14 +247,11 @@ class NovaParser:
         for line in content:
             line_num += 1
             line = line.strip()
-            if not line or line.startswith('//'):
+            if self._is_comment_or_blank(line):
                 continue
             
             # Check for equals sign
             if '=' not in line:
-                # Extract variable name for better error message
-                parts = line.split()
-                var_name = parts[0] if parts else "unknown"
                 raise NovaParserError(
                     f"Missing equals sign at line {line_num}: '{line}'. Format should be '$variable = \"pattern\"'")
             
@@ -245,9 +259,7 @@ class NovaParser:
             key = key.strip()
             
             # Check that variable name starts with $
-            if not key.startswith('$'):
-                raise NovaParserError(
-                    f"Invalid LLM variable at line {line_num}: '{key}'. Variable names must start with $")
+            self._validate_variable_name(key, "LLM", line_num)
             
             # Check for duplicate variable names
             if key in seen_variables:
@@ -261,30 +273,30 @@ class NovaParser:
             self.variable_names['llm'].add(key)
             
             value = value.strip()
-            
-            # Check for pattern and optional threshold
-            pattern_parts = value.split('(')
-            pattern = pattern_parts[0].strip()
-            
-            # Extract pattern without quotes
-            if pattern.startswith('"') and pattern.endswith('"'):
-                pattern = pattern[1:-1]
-            else:
-                # Check if pattern is missing quotes
-                raise NovaParserError(
-                    f"Invalid LLM prompt at line {line_num}: '{pattern}'. Prompts must be in double quotes")
-            
-            # Parse threshold if provided
-            threshold = 0.6  # Default threshold
-            if len(pattern_parts) > 1:
-                threshold_part = pattern_parts[1].strip()
+
+            # Parse pattern and optional threshold using regex (handles parentheses in patterns)
+            # Matches: "pattern text"(threshold) or just "pattern text"
+            threshold_match = re.search(r'^"(.+)"\s*\(\s*([0-9.]+)\s*\)\s*$', value)
+            pattern_only_match = re.search(r'^"(.+)"\s*$', value)
+
+            threshold = 0.6  # Default threshold for LLM
+
+            if threshold_match:
+                # Pattern with explicit threshold
+                pattern = threshold_match.group(1)
                 try:
-                    threshold = float(threshold_part.rstrip(') '))
+                    threshold = float(threshold_match.group(2))
                     if not 0 <= threshold <= 1:
                         raise ValueError("Threshold must be between 0.0 and 1.0")
                 except ValueError as e:
                     raise NovaParserError(
-                        f"Invalid LLM threshold at line {line_num}: '{threshold_part}'. {str(e)}")
+                        f"Invalid LLM threshold at line {line_num}: '{threshold_match.group(2)}'. {str(e)}")
+            elif pattern_only_match:
+                # Pattern without threshold
+                pattern = pattern_only_match.group(1)
+            else:
+                raise NovaParserError(
+                    f"Invalid LLM prompt at line {line_num}: '{value}'. Prompts must be in double quotes")
             
             result[key] = LLMPattern(pattern=pattern, threshold=threshold)
             
@@ -297,7 +309,7 @@ class NovaParser:
         
         for line_num, line in enumerate(content):
             # Skip empty lines and comments
-            if not line or line.strip().startswith('#'):
+            if self._is_comment_or_blank(line):
                 continue
             
             # Split the line into variable and pattern
@@ -309,9 +321,7 @@ class NovaParser:
                     f"Invalid keyword pattern at line {line_num}: '{line}'. Patterns must be in the format '$var = \"pattern\"'")
             
             # Check for "$var" format
-            if not key.startswith('$'):
-                raise NovaParserError(
-                    f"Invalid keyword variable at line {line_num}: '{key}'. Variable names must start with $")
+            self._validate_variable_name(key, "keyword", line_num)
             
             # Check for duplicate variable names
             if key in seen_variables:
@@ -331,12 +341,14 @@ class NovaParser:
             
             if is_regex:
                 # Regex pattern handling
-                if value.endswith('i'):
+                if value.endswith('/i'):
                     value = value[1:-2]  # Remove /.../ and i flag
+                    # case_sensitive stays False (case-insensitive)
                 else:
                     value = value[1:-1]  # Remove /.../ only
-                    
-                # Check if there's a case:true modifier
+                    case_sensitive = True  # No /i flag means case-sensitive
+
+                # Check if there's a case:true modifier (explicit override)
                 if "case:true" in value:
                     parts = value.split("case:true", 1)
                     value = parts[0].strip()
@@ -367,6 +379,15 @@ class NovaParser:
             
         return result
 
+    def _validate_variable_name(self, key: str, section: str, line_num: int) -> None:
+        """Validate a Nova variable name."""
+        if not key.startswith('$'):
+            raise NovaParserError(
+                f"Invalid {section} variable at line {line_num}: '{key}'. Variable names must start with $")
+        if not VARIABLE_NAME_PATTERN.match(key):
+            raise NovaParserError(
+                f"Invalid {section} variable at line {line_num}: '{key}'. Variable names may only contain letters, digits, and underscores after $")
+
     def _parse_condition_section(self, content: List[str]) -> str:
         """
         Parse the condition section with comprehensive syntax validation.
@@ -383,7 +404,7 @@ class NovaParser:
         
         # Join lines and clean up comments
         raw_condition = ' '.join(line.strip() for line in content 
-                    if line.strip() and not line.strip().startswith('//'))
+                    if not self._is_comment_or_blank(line))
 
         if not raw_condition:
             raise NovaParserError("Condition section cannot be empty")
@@ -552,6 +573,8 @@ class NovaParser:
                         if other_section != section and var_name.startswith('$' + other_section):
                             raise NovaParserError(
                                 f"Rule '{self.rule.name}': Variable '{var_name}' in {section} section appears to belong to {other_section} section")
+
+            self._validate_unique_variable_names_across_sections()
             
             # IMPORTANT: Always validate variable references in condition, even with wildcards
             try:
@@ -581,12 +604,19 @@ class NovaParser:
                 cleaned_condition = normalized_condition
                 
                 # Check for syntax patterns
-                if re.search(r'\bof\s+\([^)]*\)', cleaned_condition):
+                if re.search(r'\bof\s+\(\s*(keywords|semantics|llm)\.\$[^)]*\)', cleaned_condition):
                     raise NovaParserError(f"Rule '{self.rule.name}': Invalid syntax: 'of (keywords.$var*)'. Use section prefix in the variable reference instead (e.g., 'of keywords.$var*')")
                 
                 # Check for incorrect parentheses in wildcards - make sure to only match problematic patterns
                 if re.search(r'\(\s*(keywords|semantics|llm)\.\*\s*\)', cleaned_condition):
                     raise NovaParserError(f"Rule '{self.rule.name}': Invalid wildcard syntax: section wildcards should not be enclosed in parentheses. Use 'keywords.*' instead of '(keywords.*)'")
+
+                raw_wildcard_check_condition = QUANTIFIED_PREFIX_WILDCARD_PATTERN.sub("TRUE", cleaned_condition)
+                if RAW_STANDALONE_WILDCARD_PATTERN.search(raw_wildcard_check_condition):
+                    raise NovaParserError(
+                        f"Rule '{self.rule.name}': Invalid standalone wildcard syntax. "
+                        "Use 'any of ($prefix*)' or a section-scoped wildcard such as 'keywords.$prefix*'."
+                    )
                                 
                 # For compile check, we need to process the condition differently
                 syntax_check_condition = cleaned_condition
@@ -596,8 +626,8 @@ class NovaParser:
                 for wildcard in section_wildcards:
                     syntax_check_condition = syntax_check_condition.replace(wildcard, "True")
                 
-                # Replace "any of section.*" patterns - these cause syntax errors
-                syntax_check_condition = re.sub(r'any\s+of\s+(keywords|semantics|llm)\.\*', 'True', syntax_check_condition)
+                # Replace section quantifiers with or without an explicit wildcard suffix.
+                syntax_check_condition = SECTION_QUANTIFIER_PATTERN.sub('True', syntax_check_condition)
                 
                 # Replace variable references with True
                 syntax_check_condition = re.sub(r'[a-zA-Z0-9_]+\.\$[a-zA-Z0-9_]+\*?', 'True', syntax_check_condition)
@@ -620,7 +650,7 @@ class NovaParser:
                 
                 # Skip the compile check if the condition has Nova-specific syntax
                 has_nova_specific_syntax = False
-                if re.search(r'any\s+of\s+', cleaned_condition) or re.search(r'all\s+of\s+', cleaned_condition) or '.*' in cleaned_condition:
+                if SECTION_QUANTIFIER_PATTERN.search(cleaned_condition) or re.search(r'\b(any|all|\d+)\s+of\s+', cleaned_condition) or '.*' in cleaned_condition:
                     has_nova_specific_syntax = True
                 
                 # Only do the compile check if there's no Nova-specific syntax
@@ -672,6 +702,30 @@ class NovaParser:
             # For any other unexpected errors, add the rule name
             raise NovaParserError(f"Rule '{self.rule.name}': Unexpected error: {str(e)}")
 
+    def _validate_unique_variable_names_across_sections(self) -> None:
+        """Reject variable names reused across pattern sections."""
+        sections_by_variable = {}
+        for section, variables in self.variable_names.items():
+            for variable in variables:
+                sections_by_variable.setdefault(variable, []).append(section)
+
+        duplicates = {
+            variable: sections
+            for variable, sections in sections_by_variable.items()
+            if len(sections) > 1
+        }
+        if not duplicates:
+            return
+
+        duplicate_details = ", ".join(
+            f"{variable} ({'/'.join(sorted(sections))})"
+            for variable, sections in sorted(duplicates.items())
+        )
+        raise NovaParserError(
+            f"Rule '{self.rule.name}': Duplicate variable name across sections: {duplicate_details}. "
+            "Variable names must be unique across keywords, semantics, and llm."
+        )
+
     def _check_unused_variables(self):
         """
         Check for variables defined in pattern sections but not used in the condition,
@@ -698,6 +752,10 @@ class NovaParser:
                 section_wildcards[section] = True
                 # Mark all variables in this section as used
                 used_variables.update(self.variable_names[section])
+
+        for match in SECTION_QUANTIFIER_PATTERN.finditer(condition):
+            section = match.group(2).lower()
+            used_variables.update(self.variable_names[section])
         
         # Check for section-specific prefix wildcards (e.g., keywords.$bypass*)
         for section in ['keywords', 'semantics', 'llm']:
@@ -709,11 +767,10 @@ class NovaParser:
                     if var[1:].startswith(prefix):  # Remove $ from var name
                         used_variables.add(var)
         
-        # Check for "any of" wildcard patterns
-        any_of_pattern = r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
-        for match in re.finditer(any_of_pattern, condition):
-            prefix = match.group(1)
-            # Mark variables with this prefix from all sections as used
+        # Check for quantifier wildcard patterns such as "any of ($prefix*)",
+        # "all of ($prefix*)", and "2 of ($prefix*)".
+        for match in QUANTIFIED_PREFIX_WILDCARD_PATTERN.finditer(condition):
+            prefix = match.group(2)
             for section_vars in self.variable_names.values():
                 for var in section_vars:
                     if var[1:].startswith(prefix):
@@ -744,7 +801,7 @@ class NovaParser:
         # Simple check for explicitly referenced variables (only for non-wildcard vars)
         # Patterns like 'semantics.$var' and 'llm.$var'
         for section in ['semantics', 'llm']:
-            pattern = rf'{section}\.\$(\w+)'
+            pattern = rf'{section}\.\$([a-zA-Z0-9_]+)(?![a-zA-Z0-9_]*\*)'
             for match in re.finditer(pattern, condition):
                 var_name = f"${match.group(1)}"
                 if var_name not in self.variable_names[section]:
@@ -771,6 +828,10 @@ class NovaParser:
             section = match.group(1)
             # This is a valid pattern, remove it from working condition
             working_condition = working_condition.replace(f"{section}.*", "TRUE")
+
+        for match in SECTION_QUANTIFIER_PATTERN.finditer(condition):
+            full_match = match.group(0)
+            working_condition = working_condition.replace(full_match, "TRUE")
         
         # 2. Check section.$prefix* patterns (e.g., semantics.$injection*)
         for match in VAR_PREFIX_PATTERN.finditer(condition):
@@ -792,9 +853,9 @@ class NovaParser:
             # Remove this pattern from working condition to avoid overlap
             working_condition = working_condition.replace(full_match, "TRUE")
         
-        # 3. Handle "any of" wildcards
-        for match in ANY_OF_WILDCARD_PATTERN.finditer(condition):
-            prefix = match.group(1)
+        # 3. Handle quantifier prefix wildcards.
+        for match in QUANTIFIED_PREFIX_WILDCARD_PATTERN.finditer(condition):
+            prefix = match.group(2)
             full_match = match.group(0)
             
             # Check if any variable starts with this prefix
@@ -956,19 +1017,39 @@ class NovaRuleFileParser:
             rule_text = content[start_pos:end_pos].strip()
             
             # Verify rule completeness (has balanced braces)
-            # We use a faster, single-pass algorithm here
+            # We use a faster, single-pass algorithm that tracks quote state
+            # to avoid counting braces inside quoted strings
             brace_count = 0
             rule_end_pos = -1
-            
+            in_quotes = False
+            escape_next = False
+
             for pos, char in enumerate(rule_text):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        # Found complete rule
-                        rule_end_pos = pos + 1
-                        break
+                if escape_next:
+                    # Previous char was backslash, skip this char
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    # Next char is escaped
+                    escape_next = True
+                    continue
+
+                if char == '"':
+                    # Toggle quote state
+                    in_quotes = not in_quotes
+                    continue
+
+                # Only count braces when not inside quotes
+                if not in_quotes:
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            # Found complete rule
+                            rule_end_pos = pos + 1
+                            break
             
             if rule_end_pos > 0:
                 # If we found a valid end, make sure we only include the complete rule

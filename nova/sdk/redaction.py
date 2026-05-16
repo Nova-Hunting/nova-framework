@@ -80,45 +80,83 @@ class Redactor:
         Returns:
             RedactionResult with redacted text and details
         """
-        result_text = text
-        redactions = []
-        marker = self.custom_markers.get(category, self.marker)
-
         # Collect all matches first
         all_matches = []
         for pattern in patterns:
+            all_matches.extend(self._collect_matches(
+                text,
+                pattern,
+                category=category,
+                is_regex=True,
+                case_sensitive=False,
+            ))
+
+        return self._apply_redactions(text, all_matches)
+
+    def _collect_matches(
+        self,
+        text: str,
+        pattern: str,
+        category: str,
+        is_regex: bool,
+        case_sensitive: bool,
+    ) -> List[Dict[str, Any]]:
+        """Collect regex or literal matches with explicit keyword semantics."""
+        if not isinstance(text, str) or not isinstance(pattern, str) or not pattern:
+            return []
+
+        matches = []
+        if is_regex:
+            flags = 0 if case_sensitive else re.IGNORECASE
             try:
-                compiled = re.compile(pattern, re.IGNORECASE)
+                compiled = re.compile(pattern, flags)
                 for match in compiled.finditer(text):
-                    all_matches.append({
+                    matches.append({
                         "original": match.group(),
                         "start": match.start(),
                         "end": match.end(),
                         "pattern": pattern,
                         "category": category,
+                        "is_regex": True,
+                        "case_sensitive": case_sensitive,
                     })
+                return matches
             except re.error:
-                # Invalid regex, try literal match
-                start = 0
-                while True:
-                    idx = text.find(pattern, start)
-                    if idx == -1:
-                        break
-                    all_matches.append({
-                        "original": pattern,
-                        "start": idx,
-                        "end": idx + len(pattern),
-                        "pattern": pattern,
-                        "category": category,
-                    })
-                    start = idx + 1
+                # Preserve prior behavior for invalid user-supplied regexes.
+                is_regex = False
 
+        search_text = text if case_sensitive else text.lower()
+        search_pattern = pattern if case_sensitive else pattern.lower()
+        start = 0
+        while True:
+            idx = search_text.find(search_pattern, start)
+            if idx == -1:
+                break
+            end = idx + len(pattern)
+            matches.append({
+                "original": text[idx:end],
+                "start": idx,
+                "end": end,
+                "pattern": pattern,
+                "category": category,
+                "is_regex": False,
+                "case_sensitive": case_sensitive,
+            })
+            start = idx + 1
+
+        return matches
+
+    def _apply_redactions(self, text: str, all_matches: List[Dict[str, Any]]) -> RedactionResult:
+        """Apply match redactions in reverse order to preserve offsets."""
+        result_text = text
+        redactions = []
         # Remove duplicates and overlapping matches
         all_matches = self._dedupe_matches(all_matches)
 
         # Apply redactions in reverse order to preserve positions
         for match_info in sorted(all_matches, key=lambda x: x["start"], reverse=True):
             original = match_info["original"]
+            marker = self.custom_markers.get(match_info["category"], self.marker)
             if self.preserve_length:
                 replacement = marker[0] * len(original) if marker else "*" * len(original)
             else:
@@ -175,7 +213,7 @@ class Redactor:
         Returns:
             RedactionResult with redacted text and details
         """
-        patterns_to_redact = []
+        all_matches = []
 
         for var_name, matched in keyword_matches.items():
             if matched:
@@ -184,10 +222,16 @@ class Redactor:
                 for key, pattern_obj in keyword_patterns.items():
                     clean_key = key.lstrip('$')
                     if clean_key == clean_name:
-                        patterns_to_redact.append(pattern_obj.pattern)
+                        all_matches.extend(self._collect_matches(
+                            text,
+                            pattern_obj.pattern,
+                            category=category,
+                            is_regex=getattr(pattern_obj, "is_regex", False),
+                            case_sensitive=getattr(pattern_obj, "case_sensitive", False),
+                        ))
                         break
 
-        return self.redact_patterns(text, patterns_to_redact, category)
+        return self._apply_redactions(text, all_matches)
 
     def redact_pii(
         self,
