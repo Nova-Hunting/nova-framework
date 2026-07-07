@@ -13,6 +13,6 @@
 - The public package version is `0.3.0`; `nova.__version__` and package metadata share a single source of truth in `nova/_version.py`.
 - Supported Python versions are 3.10 and newer.
 - Contributors: the local gates now lint `nova tests scripts` (the root `test.py` script no longer exists).
-- NOVA remains beta software. Review `SECURITY.md` before reporting vulnerabilities or publishing downstream deployments.
+- Review `SECURITY.md` before reporting vulnerabilities or publishing downstream deployments.
 
 For detailed changes, see `CHANGELOG.md`. For the v0.2.1 release notes, see the `CHANGELOG.md` `[0.2.1]` section.

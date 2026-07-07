@@ -12,8 +12,6 @@ How do you detect abusive usage of your system? How do you hunt for malicious pr
 
 That's where NOVA comes in!
 
-> **Disclaimer:** NOVA is currently in beta. Expect potential bugs, incomplete features, and ongoing improvements. If you identify a bug, please [report it here](https://github.com/Nova-Hunting/nova-framework/issues).
-
 NOVA is an open-source prompt pattern matching system combining keyword detection, semantic similarity, and LLM-based evaluation to analyze and detect prompt content.
 
 [![asciicast](https://asciinema.org/a/693ywQk773innmLpYrMx0viOF.svg)](https://asciinema.org/a/693ywQk773innmLpYrMx0viOF)
