@@ -211,7 +211,15 @@ result.blocked_rules   # List of rule names that blocked
 result.flagged_rules   # List of rule names that flagged
 result.highest_severity # "critical", "high", "medium", or "low"
 result.matches         # List of RuleMatch objects with full details
+result.has_warnings    # True if any rule had degraded evaluation
+result.warnings        # Flat list of semantic/LLM evaluation warnings
+result.rule_warnings   # Warnings grouped by rule name
 ```
+
+Warnings are reported even when no rule matched. For example, a missing LLM
+provider key or an explicit `skip_llm=True` scan can leave `result.clean` true
+while `result.has_warnings` is also true, so production callers can distinguish
+"clean" from "clean with degraded coverage."
 
 ---
 
@@ -221,13 +229,14 @@ result.matches         # List of RuleMatch objects with full details
 nova = Nova(
     # Rules
     rules_path="nova-rules/",           # Path to .nov files or directory
+    ignore_invalid_rules=False,          # Raise on malformed/missing rule files by default
 
     # Policy
     policy={...},                        # Pattern → action mapping
     default_action=Action.FLAG,          # Default when no pattern matches
 
     # LLM Provider (for rules with LLM patterns)
-    llm_provider="openai",               # openai, anthropic, groq, azure, ollama
+    llm_provider="openai",               # openai, anthropic, groq, openrouter, azure, ollama
     llm_model="gpt-4o-mini",             # Specific model (optional)
 
     # Redaction
@@ -239,6 +248,24 @@ nova = Nova(
     on_flag=lambda r: log(r),            # Called when flagged
 )
 ```
+
+OpenRouter can be used for LLM-backed rules without changing rule syntax:
+
+```python
+import os
+from nova.sdk import Nova
+
+os.environ["OPENROUTER_API_KEY"] = "sk-or-..."
+
+nova = Nova(
+    rules_path="nova-rules/",
+    llm_provider="openrouter",
+    llm_model="openai/gpt-5.2",
+)
+```
+
+When `llm_model` is omitted, Nova checks provider-specific model environment variables such as `OPENROUTER_LLM_MODEL` and `OPENROUTER_MODEL`, then falls back to `NOVA_LLM_MODEL` and the provider default.
+For OpenRouter app attribution, set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to include the optional `HTTP-Referer` and `X-OpenRouter-Title` request headers.
 
 ---
 

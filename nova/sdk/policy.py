@@ -5,8 +5,9 @@ Provides policy-based action configuration for Nova rule matches.
 """
 
 from enum import Enum
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union, Callable, Any
+from dataclasses import dataclass
+from collections.abc import Mapping
+from typing import Dict, Optional, Union, Callable, Any
 
 
 class Action(Enum):
@@ -53,9 +54,9 @@ class NovaPolicy:
 
     def __init__(
         self,
-        rules: Optional[Dict[str, Union[Dict, PolicyRule]]] = None,
-        default_action: Action = Action.FLAG,
-        severity_actions: Optional[Dict[str, Action]] = None
+        rules: Optional[Dict[str, Union[Dict, PolicyRule, str, Action]]] = None,
+        default_action: Union[str, Action] = Action.FLAG,
+        severity_actions: Optional[Dict[str, Union[str, Action]]] = None
     ):
         """
         Initialize policy.
@@ -66,14 +67,43 @@ class NovaPolicy:
             severity_actions: Map severity levels to actions
         """
         self.rules: Dict[str, PolicyRule] = {}
-        self.default_action = default_action
-        self.severity_actions = severity_actions or self.DEFAULT_SEVERITY_ACTIONS.copy()
+        self.default_action = self._normalize_action(default_action)
+        if severity_actions is not None and not isinstance(severity_actions, Mapping):
+            raise ValueError("severity_actions must be a mapping of severity name to action")
+
+        configured_severity_actions = severity_actions or self.DEFAULT_SEVERITY_ACTIONS.copy()
+        self.severity_actions = {
+            self._normalize_severity(severity): self._normalize_action(action)
+            for severity, action in configured_severity_actions.items()
+        }
 
         if rules:
+            if not isinstance(rules, Mapping):
+                raise ValueError("rules must be a mapping of policy pattern to policy config")
             for pattern, config in rules.items():
                 self.add_rule(pattern, config)
 
-    def add_rule(self, pattern: str, config: Union[Dict, PolicyRule]) -> None:
+    def _normalize_action(self, action: Union[str, Action]) -> Action:
+        """Normalize string or enum policy actions to Action."""
+        if isinstance(action, Action):
+            return action
+        if isinstance(action, str):
+            return Action(action.strip().lower())
+        raise ValueError(f"Invalid policy action: {action!r}")
+
+    def _normalize_pattern(self, pattern: str) -> str:
+        """Validate and normalize policy match patterns."""
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError(f"Policy pattern must be a non-empty string: {pattern!r}")
+        return pattern.strip()
+
+    def _normalize_severity(self, severity: str) -> str:
+        """Validate and normalize severity names."""
+        if not isinstance(severity, str) or not severity.strip():
+            raise ValueError(f"Severity name must be a non-empty string: {severity!r}")
+        return severity.strip().lower()
+
+    def add_rule(self, pattern: str, config: Union[Dict, PolicyRule, str, Action]) -> None:
         """
         Add a policy rule for a pattern.
 
@@ -81,16 +111,36 @@ class NovaPolicy:
             pattern: Pattern to match (rule name, prefix, or category wildcard)
             config: PolicyRule or dict with action, severity, message, callback
         """
+        pattern = self._normalize_pattern(pattern)
         if isinstance(config, PolicyRule):
-            self.rules[pattern] = config
-        else:
-            action_str = config.get("action", "flag")
-            action = Action(action_str) if isinstance(action_str, str) else action_str
+            self.rules[pattern] = PolicyRule(
+                action=self._normalize_action(config.action),
+                severity=config.severity,
+                message=config.message,
+                callback=config.callback,
+            )
+        elif isinstance(config, (str, Action)):
+            self.rules[pattern] = PolicyRule(action=self._normalize_action(config))
+        elif isinstance(config, Mapping):
+            action = self._normalize_action(config.get("action", "flag"))
+            callback = config.get("callback")
+            if callback is not None and not callable(callback):
+                raise ValueError(f"Policy callback for pattern '{pattern}' must be callable")
+            severity = config.get("severity")
+            if severity is not None and not isinstance(severity, str):
+                raise ValueError(f"Policy severity for pattern '{pattern}' must be a string")
+            message = config.get("message")
+            if message is not None and not isinstance(message, str):
+                raise ValueError(f"Policy message for pattern '{pattern}' must be a string")
             self.rules[pattern] = PolicyRule(
                 action=action,
-                severity=config.get("severity"),
-                message=config.get("message"),
-                callback=config.get("callback")
+                severity=severity,
+                message=message,
+                callback=callback
+            )
+        else:
+            raise ValueError(
+                f"Policy config for pattern '{pattern}' must be a mapping, PolicyRule, string, or Action"
             )
 
     def get_action_for_match(
@@ -149,10 +199,10 @@ class NovaPolicy:
         # 5. Global default
         return PolicyRule(action=self.default_action)
 
-    def set_severity_action(self, severity: str, action: Action) -> None:
+    def set_severity_action(self, severity: str, action: Union[str, Action]) -> None:
         """Set the default action for a severity level."""
-        self.severity_actions[severity.lower()] = action
+        self.severity_actions[self._normalize_severity(severity)] = self._normalize_action(action)
 
-    def set_default_action(self, action: Action) -> None:
+    def set_default_action(self, action: Union[str, Action]) -> None:
         """Set the global default action."""
-        self.default_action = action
+        self.default_action = self._normalize_action(action)

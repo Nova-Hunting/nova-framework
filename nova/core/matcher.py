@@ -3,14 +3,14 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Core matcher implementation for Nova rules
 """
 
-from typing import Dict, List, Tuple, Optional, Any, Set, Callable
+from typing import Dict, Optional, Any, Set
 import re
 
-from nova.core.rules import NovaRule, KeywordPattern, SemanticPattern, LLMPattern
+from nova.core.rules import NovaRule
 from nova.evaluators.keywords import DefaultKeywordEvaluator
 from nova.evaluators.condition import (
     evaluate_condition,
@@ -185,18 +185,20 @@ class NovaMatcher:
         
         # Check for section wildcards
         for section in ['keywords', 'semantics', 'llm']:
-            if f"{section}.*" in condition:
+            if f"{section}.*" in condition.lower():
                 needed_patterns['section_wildcards'].add(section)
                 
-        # Check for "any of" section wildcards
+        # Check for section quantifiers with or without explicit wildcard suffix,
+        # e.g. "any of keywords", "all of keywords.*", or "2 of llm".
         for section in ['keywords', 'semantics', 'llm']:
-            if f"any of {section}.*" in condition:
+            section_quantifier = rf'\b(any|all|\d+)\s+of\s+{section}(?:\.\*)?\b'
+            if re.search(section_quantifier, condition, flags=re.IGNORECASE):
                 needed_patterns['section_wildcards'].add(section)
 
         # Check for direct variable references with section prefixes
         for section in ['keywords', 'semantics', 'llm']:
             # Exact references: "section.$var"
-            pattern = rf'{section}\.\$([a-zA-Z0-9_]+)(?!\*)'
+            pattern = rf'{section}\.\$([a-zA-Z0-9_]+)(?![a-zA-Z0-9_]*\*)'
             for match in re.finditer(pattern, condition):
                 var_name = f"${match.group(1)}"
                 needed_patterns[section].add(var_name)
@@ -211,7 +213,7 @@ class NovaMatcher:
                         needed_patterns[section].add(var_name)
         
         # Check for standalone variables ($var)
-        var_pattern = r'(?<![a-zA-Z0-9_\.])(\$[a-zA-Z0-9_]+)(?!\*)'
+        var_pattern = r'(?<![a-zA-Z0-9_\.\$])(\$[a-zA-Z0-9_]+)(?![a-zA-Z0-9_\*])'
         for match in re.finditer(var_pattern, condition):
             var_name = match.group(1)
             
@@ -223,9 +225,9 @@ class NovaMatcher:
             elif var_name in self.rule.llms:
                 needed_patterns['llm'].add(var_name)
         
-        # Check for "any of" wildcards
-        any_of_pattern = r'any\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
-        for match in re.finditer(any_of_pattern, condition):
+        # Check for quantifier wildcards such as "any/all/N of ($prefix*)"
+        quantified_prefix_pattern = r'(?:any|all|\d+)\s+of\s+\(\$([a-zA-Z0-9_]+)\*\)'
+        for match in re.finditer(quantified_prefix_pattern, condition, flags=re.IGNORECASE):
             prefix = match.group(1)
             
             # Add all matching variables from all sections
@@ -240,7 +242,7 @@ class NovaMatcher:
         
         return needed_patterns
         
-    def check_prompt(self, prompt: str) -> Dict[str, Any]:
+    def check_prompt(self, prompt: str, skip_llm: bool = False) -> Dict[str, Any]:
         """
         Check if a prompt matches the rule.
 
@@ -249,6 +251,7 @@ class NovaMatcher:
 
         Args:
             prompt: The prompt text to check
+            skip_llm: If True, do not run LLM evaluation even when the rule references LLM patterns
 
         Returns:
             Dictionary containing match results and details
@@ -269,6 +272,7 @@ class NovaMatcher:
         keyword_matches = {}
         semantic_matches = {}
         llm_matches = {}
+        evaluation_warnings = []
 
         # Helper function to build final results
         def build_results(has_match: bool, condition_result: Any) -> Dict[str, Any]:
@@ -284,12 +288,18 @@ class NovaMatcher:
                 'debug': {
                     'condition': condition,
                     'condition_result': condition_result,
+                    'evaluation_warnings': evaluation_warnings,
                     'all_keyword_matches': all_keyword_matches,
                     'all_semantic_matches': all_semantic_matches,
                     'all_llm_matches': all_llm_matches,
                     'all_llm_details': all_llm_details
                 }
             }
+
+        def fail_closed_warning(message: str) -> Dict[str, Any]:
+            evaluation_warnings.append(message)
+            logger.warning(message)
+            return build_results(False, False)
 
         # ------ STAGE 1: EVALUATE KEYWORDS (fastest) ------
 
@@ -301,9 +311,12 @@ class NovaMatcher:
                     all_keyword_matches[key] = result
                     keyword_matches[key] = result
                 except Exception as e:
-                    logger.error(f"Error evaluating keywords.{key}: {str(e)}")
                     all_keyword_matches[key] = False
                     keyword_matches[key] = False
+                    logger.error(f"Error evaluating keywords.{key}: {str(e)}")
+                    return fail_closed_warning(
+                        f"Rule '{self.rule.name}' failed closed because keywords.{key} evaluation errored: {e}"
+                    )
 
         # Update keyword_matches for wildcards
         if 'keywords' in needed_patterns['section_wildcards']:
@@ -315,8 +328,11 @@ class NovaMatcher:
             try:
                 early_result = evaluate_condition(condition, keyword_matches, {}, {})
                 if early_result:
-                    # Condition satisfied with just keywords - no need for semantic/LLM
-                    return build_results(True, early_result)
+                    semantics_can_change = can_semantics_change_outcome(condition, keyword_matches)
+                    llm_can_change = can_llm_change_outcome(condition, keyword_matches, {})
+                    if not semantics_can_change and not llm_can_change:
+                        # Condition satisfied with just keywords - no need for semantic/LLM
+                        return build_results(True, early_result)
             except Exception:
                 # Can't determine yet, continue with more patterns
                 pass
@@ -330,6 +346,14 @@ class NovaMatcher:
             skip_semantics = True
             logger.debug(f"Skipping semantic evaluation for rule '{self.rule.name}' - can't change outcome")
 
+        if self.rule.semantics and self.semantic_evaluator is None and not skip_semantics:
+            warning = (
+                f"Rule '{self.rule.name}' requires semantic evaluation, but no semantic evaluator is available."
+            )
+            evaluation_warnings.append(warning)
+            logger.warning(warning)
+            return build_results(False, False)
+
         if self.semantic_evaluator and not skip_semantics:
             for key, pattern in self.rule.semantics.items():
                 if key in needed_patterns['semantics'] or 'semantics' in needed_patterns['section_wildcards']:
@@ -338,11 +362,19 @@ class NovaMatcher:
                         all_semantic_matches[key] = matched
                         all_semantic_scores[key] = score
                         semantic_matches[key] = matched
+                        semantic_error = getattr(self.semantic_evaluator, "last_error", None)
+                        if semantic_error:
+                            return fail_closed_warning(
+                                f"Rule '{self.rule.name}' failed closed because semantics.{key} evaluation errored: {semantic_error}"
+                            )
                     except Exception as e:
-                        logger.error(f"Error evaluating semantics.{key}: {str(e)}")
                         all_semantic_matches[key] = False
                         all_semantic_scores[key] = 0.0
                         semantic_matches[key] = False
+                        logger.error(f"Error evaluating semantics.{key}: {str(e)}")
+                        return fail_closed_warning(
+                            f"Rule '{self.rule.name}' failed closed because semantics.{key} evaluation errored: {e}"
+                        )
 
             # Update semantic_matches for wildcards
             if 'semantics' in needed_patterns['section_wildcards']:
@@ -353,8 +385,9 @@ class NovaMatcher:
                 try:
                     early_result = evaluate_condition(condition, keyword_matches, semantic_matches, {})
                     if early_result:
-                        # Condition satisfied - no need for expensive LLM evaluation
-                        return build_results(True, early_result)
+                        if not can_llm_change_outcome(condition, keyword_matches, semantic_matches):
+                            # Condition satisfied - no need for expensive LLM evaluation
+                            return build_results(True, early_result)
                 except Exception:
                     # Can't determine yet, continue
                     pass
@@ -362,13 +395,33 @@ class NovaMatcher:
         # ------ STAGE 3: EVALUATE LLM PATTERNS (most expensive) ------
 
         # Check if LLM could possibly change the outcome before running expensive API calls
-        skip_llm = False
-        if condition and not can_llm_change_outcome(condition, keyword_matches, semantic_matches):
+        llm_can_change = False
+        if condition:
+            llm_can_change = can_llm_change_outcome(condition, keyword_matches, semantic_matches)
+
+        skip_llm_stage = skip_llm
+        if skip_llm_stage and llm_can_change:
+            warning = (
+                f"Rule '{self.rule.name}' skipped LLM evaluation, but LLM results could change the outcome."
+            )
+            evaluation_warnings.append(warning)
+            logger.warning(warning)
+            return build_results(False, False)
+
+        if condition and not skip_llm_stage and not llm_can_change:
             # LLM can't change the outcome - skip this evaluation stage
-            skip_llm = True
+            skip_llm_stage = True
             logger.debug(f"Skipping LLM evaluation for rule '{self.rule.name}' - can't change outcome")
 
-        if self.llm_evaluator and not skip_llm:
+        if self.rule.llms and self.llm_evaluator is None and not skip_llm_stage:
+            warning = (
+                f"Rule '{self.rule.name}' requires LLM evaluation, but no LLM evaluator is available."
+            )
+            evaluation_warnings.append(warning)
+            logger.warning(warning)
+            return build_results(False, False)
+
+        if self.llm_evaluator and not skip_llm_stage:
             for key, pattern in self.rule.llms.items():
                 if key in needed_patterns['llm'] or 'llm' in needed_patterns['section_wildcards']:
                     try:
@@ -382,8 +435,11 @@ class NovaMatcher:
                         all_llm_scores[key] = confidence
                         llm_matches[key] = matched
                         all_llm_details[key] = details
+                        if isinstance(details, dict) and details.get("error"):
+                            return fail_closed_warning(
+                                f"Rule '{self.rule.name}' failed closed because llm.{key} evaluation errored: {details['error']}"
+                            )
                     except Exception as e:
-                        logger.error(f"Error evaluating llm.{key}: {str(e)}")
                         all_llm_matches[key] = False
                         all_llm_scores[key] = 0.0
                         llm_matches[key] = False
@@ -392,6 +448,10 @@ class NovaMatcher:
                             "error": str(e),
                             "evaluator_type": "unknown",
                         }
+                        logger.error(f"Error evaluating llm.{key}: {str(e)}")
+                        return fail_closed_warning(
+                            f"Rule '{self.rule.name}' failed closed because llm.{key} evaluation errored: {e}"
+                        )
             # Update llm_matches for wildcards
             if 'llm' in needed_patterns['section_wildcards']:
                 llm_matches.update(all_llm_matches)

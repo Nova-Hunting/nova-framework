@@ -3,7 +3,7 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia 
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Core components package initialization
 """
 

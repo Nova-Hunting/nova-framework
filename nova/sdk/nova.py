@@ -8,6 +8,7 @@ import functools
 import asyncio
 import time
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Union, Callable, Any
 from pathlib import Path
@@ -15,14 +16,14 @@ from pathlib import Path
 # Suppress tokenizers parallelism warning when using threading
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-from nova.core.scanner import NovaScanner
 from nova.core.matcher import NovaMatcher
 from nova.core.parser import NovaParser
 from nova.core.rules import NovaRule
 from nova.evaluators.llm import get_validated_evaluator, LLMEvaluator
 from nova.evaluators.condition import can_llm_change_outcome
+from nova.utils.helpers import normalize_unicode
 
-from .policy import NovaPolicy, Action, PolicyRule
+from .policy import NovaPolicy, Action
 from .result import ScanResult, RuleMatch
 from .redaction import Redactor
 from .exceptions import NovaBlockedError, NovaConfigError
@@ -75,6 +76,7 @@ class Nova:
         auto_redact: bool = True,
         on_block: Optional[Callable[["ScanResult"], Any]] = None,
         on_flag: Optional[Callable[["ScanResult"], Any]] = None,
+        ignore_invalid_rules: bool = False,
         debug: bool = False,
     ):
         """
@@ -85,12 +87,13 @@ class Nova:
             rules: Pre-loaded NovaRule objects
             policy: Policy configuration (dict or NovaPolicy)
             default_action: Default action when no policy matches
-            llm_provider: LLM provider: "openai", "anthropic", "groq", "azure", "ollama"
+            llm_provider: LLM provider: "openai", "anthropic", "groq", "openrouter", "azure", "ollama"
             llm_model: Specific model override (optional)
             redaction_marker: Text to use for redactions
             auto_redact: Whether to automatically redact on REDACT action
             on_block: Callback when a request is blocked
             on_flag: Callback when a request is flagged
+            ignore_invalid_rules: Skip invalid rule files instead of raising NovaConfigError
             debug: Enable debug mode to print detailed match information
         """
         init_start = time.perf_counter()
@@ -102,10 +105,12 @@ class Nova:
         self._llm_evaluator: Optional[LLMEvaluator] = None
         self._llm_provider = llm_provider
         self._llm_model = llm_model
+        self._ignore_invalid_rules = ignore_invalid_rules
 
         # Load rules
         if rules:
-            self._rules.extend(rules)
+            for rule in rules:
+                self._append_rule(rule)
         if rules_path:
             self._load_rules(rules_path)
 
@@ -144,41 +149,69 @@ class Nova:
             if path.is_file():
                 self._load_rule_file(path, parser)
             elif path.is_dir():
-                for rule_file in path.glob("*.nov"):
+                try:
+                    rule_files = sorted(path.rglob("*.nov"))
+                except OSError as e:
+                    self._handle_rule_load_error(path, f"could not inspect directory: {e}", e)
+                    continue
+                if not rule_files and not self._ignore_invalid_rules:
+                    raise NovaConfigError(f"No .nov rule files found under rules_path: {path}")
+                for rule_file in rule_files:
                     self._load_rule_file(rule_file, parser)
+            elif not self._ignore_invalid_rules:
+                raise NovaConfigError(f"Rules path does not exist or is not readable: {path}")
 
     def _load_rule_file(self, path: Path, parser: NovaParser) -> None:
         """Load rules from a single file."""
-        content = path.read_text()
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as e:
+            self._handle_rule_load_error(path, f"could not read file: {e}", e)
+            return
 
         # Check if file contains multiple rules
-        rule_count = content.lower().count('rule ')
+        rule_count = len(re.findall(r'^\s*rule\s+\w+\s*{?', content, flags=re.MULTILINE))
+        loaded_before = len(self._rules)
         if rule_count > 1:
             # Parse multiple rules - split by 'rule ' keyword
             rule_blocks = self._split_rule_blocks(content)
-            for block in rule_blocks:
+            for index, block in enumerate(rule_blocks, start=1):
                 if block.strip():
                     try:
                         rule = parser.parse(block)
-                        self._rules.append(rule)
-                        self._rule_sources[rule.name] = str(path)
-                    except Exception:
-                        pass  # Skip invalid rules
+                        self._append_rule(rule, path)
+                    except Exception as e:
+                        self._handle_rule_load_error(path, f"rule block #{index} failed to parse: {e}", e)
         else:
             # Single rule
             try:
                 rule = parser.parse(content)
-                self._rules.append(rule)
-                self._rule_sources[rule.name] = str(path)
-            except Exception:
-                pass
+                self._append_rule(rule, path)
+            except Exception as e:
+                self._handle_rule_load_error(path, f"failed to parse rule: {e}", e)
+
+        if len(self._rules) == loaded_before and not self._ignore_invalid_rules:
+            raise NovaConfigError(f"No valid rules loaded from {path}")
+
+    def _handle_rule_load_error(self, path: Path, message: str, error: Exception) -> None:
+        """Handle rule-loading failures according to strict/ignore mode."""
+        if self._ignore_invalid_rules:
+            return
+        raise NovaConfigError(f"Failed to load rule file {path}: {message}") from error
+
+    def _append_rule(self, rule: NovaRule, source: Optional[Path] = None) -> None:
+        """Append a rule while preserving unique rule names."""
+        if any(existing.name == rule.name for existing in self._rules):
+            raise NovaConfigError(f"Duplicate rule name loaded: {rule.name}")
+        self._rules.append(rule)
+        if source is not None:
+            self._rule_sources[rule.name] = str(source)
 
     def _split_rule_blocks(self, content: str) -> List[str]:
         """Split content into individual rule blocks."""
-        import re
         # Split on 'rule' keyword at start of line or after newline
-        pattern = r'(?=\brule\s+\w+)'
-        blocks = re.split(pattern, content, flags=re.IGNORECASE)
+        pattern = r'(?=^\s*rule\s+\w+)'
+        blocks = re.split(pattern, content, flags=re.IGNORECASE | re.MULTILINE)
         return [b for b in blocks if b.strip()]
 
     def _initialize_evaluators(self) -> None:
@@ -218,22 +251,24 @@ class Nova:
         # Check if any rule needs LLM evaluation
         needs_llm = any(self._rule_needs_llm(rule) for rule in self._rules)
 
-        if needs_llm and self._llm_provider:
-            try:
-                self._llm_evaluator = get_validated_evaluator(
-                    self._llm_provider,
-                    model=self._llm_model,
-                    verbose=False
-                )
-            except ValueError as e:
-                raise NovaConfigError(f"Failed to initialize LLM evaluator: {e}")
-        elif needs_llm:
-            # Default to OpenAI if no provider specified
-            try:
-                self._llm_evaluator = get_validated_evaluator("openai", verbose=False)
-            except ValueError:
-                # LLM not available, rules with LLM patterns won't work
-                pass
+        if needs_llm:
+            self._llm_evaluator = self._create_configured_llm_evaluator()
+
+    def _create_configured_llm_evaluator(self) -> Optional[LLMEvaluator]:
+        """Create the configured LLM evaluator, preserving fail-closed provider behavior."""
+        provider = self._llm_provider or "openai"
+        try:
+            return get_validated_evaluator(
+                provider,
+                model=self._llm_model,
+                verbose=False
+            )
+        except ValueError as e:
+            if self._llm_provider:
+                raise NovaConfigError(f"Failed to initialize LLM evaluator: {e}") from e
+            # Preserve historical behavior for default OpenAI: no key means LLM
+            # rules fail closed instead of blocking keyword-only use.
+            return None
 
     def _rule_needs_llm(self, rule: NovaRule) -> bool:
         """Check if a rule requires LLM evaluation."""
@@ -242,6 +277,40 @@ class Nova:
         if rule.condition and 'llm.' in rule.condition.lower():
             return True
         return False
+
+    def _redact_keyword_matches(
+        self,
+        text: str,
+        keyword_matches: Dict[str, bool],
+        keyword_patterns: Dict[str, Any],
+        category: str,
+    ):
+        """
+        Redact keyword matches, falling back to normalized text when matching
+        only succeeded after Unicode normalization.
+        """
+        redaction_result = self._redactor.redact_keywords(
+            text,
+            keyword_matches,
+            keyword_patterns,
+            category=category
+        )
+        if redaction_result.redactions:
+            return redaction_result
+
+        normalized_text = normalize_unicode(text)
+        if normalized_text == text:
+            return redaction_result
+
+        normalized_result = self._redactor.redact_keywords(
+            normalized_text,
+            keyword_matches,
+            keyword_patterns,
+            category=category
+        )
+        for redaction in normalized_result.redactions:
+            redaction["normalized"] = True
+        return normalized_result
 
     def _initialize_matchers(self) -> None:
         """Create matchers for all rules, sharing evaluators."""
@@ -276,9 +345,12 @@ class Nova:
         # Start timing for debug mode
         scan_start_time = time.perf_counter()
 
+        scan_text = normalize_unicode(text)
         matches = []
         sanitized_text = text
         all_redactions = []
+        scan_warnings: List[str] = []
+        rule_warnings: Dict[str, List[str]] = {}
 
         # Identify rules that have LLM patterns
         rules_with_llm = set()
@@ -299,13 +371,7 @@ class Nova:
 
             # For rules with LLM, check if keywords/semantics alone can satisfy the condition
             if rule.name in rules_with_llm:
-                # Temporarily disable LLM evaluator to get fast-only results
-                original_llm = matcher.llm_evaluator
-                matcher.llm_evaluator = None
-                try:
-                    result = matcher.check_prompt(text)
-                finally:
-                    matcher.llm_evaluator = original_llm
+                result = matcher.check_prompt(scan_text, skip_llm=True)
 
                 if result.get('matched', False):
                     # Rule matched without needing LLM - great!
@@ -319,7 +385,7 @@ class Nova:
                     fast_results.append((rule, result))
             else:
                 # No LLM patterns - full evaluation is fast
-                result = matcher.check_prompt(text)
+                result = matcher.check_prompt(scan_text)
                 if result:
                     fast_results.append((rule, result))
                     if result.get('matched', False):
@@ -354,11 +420,38 @@ class Nova:
                     results.append((rule, result))
 
             # Helper to evaluate a single rule with LLM
+            def build_llm_worker_failure(rule, error: Exception):
+                warning = (
+                    f"Rule '{rule.name}' failed closed because SDK LLM evaluation errored: {error}"
+                )
+                return {
+                    "matched": False,
+                    "rule_name": rule.name,
+                    "meta": rule.meta,
+                    "matching_keywords": {},
+                    "matching_semantics": {},
+                    "matching_llm": {},
+                    "semantic_scores": {},
+                    "llm_scores": {},
+                    "debug": {
+                        "condition": rule.condition,
+                        "condition_result": False,
+                        "evaluation_warnings": [warning],
+                        "all_keyword_matches": {},
+                        "all_semantic_matches": {},
+                        "all_llm_matches": {},
+                        "all_llm_details": {},
+                    },
+                }
+
             def evaluate_rule_with_llm(rule):
                 matcher = self._matchers.get(rule.name)
                 if not matcher:
-                    return None
-                return matcher.check_prompt(text)
+                    return build_llm_worker_failure(rule, RuntimeError("matcher not found"))
+                try:
+                    return matcher.check_prompt(scan_text)
+                except Exception as e:
+                    return build_llm_worker_failure(rule, e)
 
             # Process LLM rules in parallel if enabled and there are multiple
             if parallel and len(rules_needing_llm) > 1:
@@ -374,8 +467,8 @@ class Nova:
                             result = future.result()
                             if result:
                                 results.append((rule, result))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            results.append((rule, build_llm_worker_failure(rule, e)))
             else:
                 for rule in rules_needing_llm:
                     result = evaluate_rule_with_llm(rule)
@@ -384,6 +477,11 @@ class Nova:
 
         # Process all results
         for rule, result in results:
+            warnings = result.get("debug", {}).get("evaluation_warnings", [])
+            if warnings:
+                rule_warnings.setdefault(rule.name, []).extend(warnings)
+                scan_warnings.extend(warnings)
+
             if not result.get('matched', False):
                 continue
 
@@ -392,6 +490,14 @@ class Nova:
 
             # Get policy action for this match
             policy_rule = self._policy.get_action_for_match(rule_name, rule_meta)
+            matching_keywords = result.get("matching_keywords", {})
+            matching_semantics = result.get("matching_semantics", {})
+            matching_llm = result.get("matching_llm", {})
+            matched_patterns = [
+                *[name for name, matched in matching_keywords.items() if matched],
+                *[name for name, matched in matching_semantics.items() if matched],
+                *[name for name, matched in matching_llm.items() if matched],
+            ]
 
             # Create RuleMatch
             match = RuleMatch(
@@ -400,18 +506,19 @@ class Nova:
                 action=policy_rule.action,
                 severity=rule_meta.get("severity"),
                 source_file=self._rule_sources.get(rule_name),
-                matching_keywords=result.get("matching_keywords", {}),
-                matching_semantics=result.get("matching_semantics", {}),
-                matching_llm=result.get("matching_llm", {}),
+                matching_keywords=matching_keywords,
+                matching_semantics=matching_semantics,
+                matching_llm=matching_llm,
                 semantic_scores=result.get("semantic_scores", {}),
                 llm_scores=result.get("llm_scores", {}),
+                matched_patterns=matched_patterns,
             )
             matches.append(match)
 
             # Handle redaction if needed
             if policy_rule.action == Action.REDACT and self._auto_redact:
                 if match.matching_keywords:
-                    redaction_result = self._redactor.redact_keywords(
+                    redaction_result = self._redact_keyword_matches(
                         sanitized_text,
                         match.matching_keywords,
                         rule.keywords,
@@ -429,7 +536,9 @@ class Nova:
             original_text=text,
             sanitized_text=sanitized_text,
             matches=matches,
-            redactions=all_redactions
+            redactions=all_redactions,
+            warnings=scan_warnings,
+            rule_warnings=rule_warnings
         )
 
         # Execute global callbacks
@@ -603,7 +712,7 @@ class Nova:
         has_semantic = sum(1 for r in self._rules if r.semantics)
         has_llm = sum(1 for r in self._rules if r.llms)
 
-        print(f"\n[NOVA DEBUG] Initialization complete")
+        print("\n[NOVA DEBUG] Initialization complete")
         print(f"[NOVA DEBUG] Rules loaded: {len(self._rules)} ({keyword_only} keyword-only, {has_semantic} semantic, {has_llm} LLM)")
 
         # Semantic model info
@@ -662,7 +771,7 @@ class Nova:
                 matched_kw = [k for k, v in match.matching_keywords.items() if v]
                 print(f"  Keywords matched: {matched_kw if matched_kw else 'None'}")
             else:
-                print(f"  Keywords matched: None")
+                print("  Keywords matched: None")
 
             # Get the rule object for pattern content lookup
             rule = self._matchers.get(match.rule_name)
@@ -670,7 +779,7 @@ class Nova:
 
             # Semantics with scores and pattern content
             if match.matching_semantics or match.semantic_scores:
-                print(f"  Semantics matched:")
+                print("  Semantics matched:")
                 for name in set(list(match.matching_semantics.keys()) + list(match.semantic_scores.keys())):
                     matched = match.matching_semantics.get(name, False)
                     score = match.semantic_scores.get(name, 0)
@@ -683,11 +792,11 @@ class Nova:
                         pattern_text = f'"{pattern.pattern}" (threshold={threshold})'
                     print(f"    - {name}: {pattern_text} score={score:.3f} {status}")
             else:
-                print(f"  Semantics matched: None")
+                print("  Semantics matched: None")
 
             # LLM with scores and prompt content
             if match.matching_llm or match.llm_scores:
-                print(f"  LLM matched:")
+                print("  LLM matched:")
                 for name in set(list(match.matching_llm.keys()) + list(match.llm_scores.keys())):
                     matched = match.matching_llm.get(name, False)
                     score = match.llm_scores.get(name, 0)
@@ -701,7 +810,7 @@ class Nova:
                         prompt_text = f'"{prompt_preview}" (threshold={threshold})'
                     print(f"    - {name}: {prompt_text} score={score:.3f} {status}")
             else:
-                print(f"  LLM matched: None")
+                print("  LLM matched: None")
 
         print()  # Final newline for readability
 
@@ -712,12 +821,15 @@ class Nova:
         if rule.name in self._matchers:
             raise ValueError(f"Rule with name '{rule.name}' already exists")
 
+        if self._rule_needs_llm(rule) and self._llm_evaluator is None:
+            self._llm_evaluator = self._create_configured_llm_evaluator()
+
         self._rules.append(rule)
         self._matchers[rule.name] = NovaMatcher(
             rule=rule,
             semantic_evaluator=self._semantic_evaluator,  # Share the semantic evaluator
             llm_evaluator=self._llm_evaluator,
-            create_llm_evaluator=self._llm_evaluator is None
+            create_llm_evaluator=False
         )
 
     def add_policy_rule(self, pattern: str, config: Dict) -> None:

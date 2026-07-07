@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible NOVA engine bug
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include secrets or private prompts. If this is a security issue, report it privately using SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: NOVA version or commit
+      description: Package version, commit SHA, or branch.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - parser
+        - matcher
+        - scanner
+        - evaluator
+        - SDK
+        - CLI
+        - packaging
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal rule, prompt, command, or code snippet that reproduces the issue.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, OS, install method, and relevant provider configuration.

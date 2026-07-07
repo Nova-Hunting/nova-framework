@@ -3,7 +3,7 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Keyword pattern evaluator implementations
 """
 
@@ -46,15 +46,21 @@ class DefaultKeywordEvaluator(KeywordEvaluator):
     def evaluate(self, pattern: KeywordPattern, text: str, key: str = None) -> bool:
         """
         Check if a keyword pattern matches the text.
-        
+
         Args:
             pattern: The KeywordPattern to match
             text: The text to evaluate
             key: Optional pattern key for cached regex patterns
-            
+
         Returns:
             Boolean indicating whether the pattern matches
         """
+        # Input validation - handle None/empty text gracefully
+        if text is None or not isinstance(text, str):
+            return False
+        if not text.strip():
+            return False
+
         if pattern.is_regex:
             # Try to use cached pattern if key is provided
             compiled_pattern = None

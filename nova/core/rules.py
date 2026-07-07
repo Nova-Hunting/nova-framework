@@ -3,12 +3,12 @@ NOVA: The Prompt Pattern Matching
 Author: Thomas Roccia 
 twitter: @fr0gger_
 License: MIT License
-Version: 1.0.0
+Version: see nova._version
 Description: Rule definitions and pattern classes for pattern matching
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Union, Tuple, Any
+from typing import Dict
 
 
 @dataclass

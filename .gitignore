@@ -1,13 +1,23 @@
+# macOS
 .DS_Store
+
+# Python bytecode
 __pycache__/
 *.py[oc]
+
+# Build artifacts
 build/
 dist/
 wheels/
 *.egg-info
+
 # Virtual environments
 .venv
-optimized_matcher.py
-optimized_test.py
-# Pytest cache
-tests/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Local tool/session data
+.nova-tracer/
+.novahunting/

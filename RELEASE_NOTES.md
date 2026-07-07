@@ -1,30 +1,18 @@
-# Nova Hunting v0.1.4 Release Notes
+# Nova Hunting v0.3.0 Release Notes
 
-## Version Update
-- **Updated**: Version from 0.1.3 to 0.1.4
+## Highlights
+- Added optional app attribution headers for OpenRouter: set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send `HTTP-Referer` and `X-OpenRouter-Title` with OpenRouter requests, or pass `http_referer` / `app_title` to `OpenRouterEvaluator`.
+- Fixed CLI startup so keyword-only scans and `novarun --help` do not import optional `transformers` or `torch` packages.
+- Restructured the LLM evaluator module into a per-provider package (`nova/evaluators/llm/`) and moved the multi-rule file parser into `nova/core/rule_file.py`. All public import paths, including `nova.evaluators.llm` and `nova.core.parser`, are unchanged.
+- Added `ARCHITECTURE.md`, a troubleshooting guide in `INSTALLATION.md`, and SDK quick-start and testing sections in `README.md`.
+- Removed legacy pre-pytest manual test harnesses, the obsolete root `test.py` scratch script, and the unused `first.gif` asset, and updated the lint/compile gates accordingly.
 
-## Bug Fixes
-- **Fixed**: Warning about `clean_up_tokenization_spaces` from transformers library
-- **Added**: Warning filter to suppress FutureWarning messages related to tokenization spaces
-- **Modified**: Multiple files to set tokenization parameters correctly
+## Compatibility
+- No breaking changes. The public API, SDK behavior, CLI commands, `.nov` rule syntax, configuration format, and detection semantics are unchanged from v0.2.1.
+- All supported LLM providers remain compatible: OpenAI, Anthropic, Azure OpenAI, Ollama, Groq, and OpenRouter.
+- The public package version is `0.3.0`; `nova.__version__` and package metadata share a single source of truth in `nova/_version.py`.
+- Supported Python versions are 3.10 and newer.
+- Contributors: the local gates now lint `nova tests scripts` (the root `test.py` script no longer exists).
+- NOVA remains beta software. Review `SECURITY.md` before reporting vulnerabilities or publishing downstream deployments.
 
-## Previous Features (v0.1.2)
-
-### Package Rename
-- **Changed**: Package renamed from nova-framework to nova-hunting
-- **Updated**: Version to 0.1.2
-
-### Performance Optimizations
-- LLM evaluator sharing across rules in NovaScanner class
-- Significantly improved performance by reusing LLM evaluators
-- Lazy initialization of LLM resources
-
-### Groq Cloud Support
-- New GroqEvaluator class for using Groq Cloud's ultra-fast LLM API
-- Support for Groq's LLM models including llama-3.3-70b-versatile
-
-### Bug Fixes
-- Invalid regex pattern validation in the parser
-- Proper error handling for malformed regex patterns
-
-For detailed changes, see the full CHANGELOG.md file.
+For detailed changes, see `CHANGELOG.md`. For the v0.2.1 release notes, see the `CHANGELOG.md` `[0.2.1]` section.

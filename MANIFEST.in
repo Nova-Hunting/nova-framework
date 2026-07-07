@@ -1,0 +1,36 @@
+include README.md
+include LICENCE
+include ARCHITECTURE.md
+include CHANGELOG.md
+include RELEASE_NOTES.md
+include INSTALLATION.md
+include SECURITY.md
+include CONTRIBUTING.md
+include RELEASE.md
+include PRODUCTION_READINESS.md
+include pyproject.toml
+include setup.py
+include .github/PULL_REQUEST_TEMPLATE.md
+include .github/dependabot.yml
+include .github/workflows/ci.yml
+include .github/workflows/codeql.yml
+include .github/ISSUE_TEMPLATE/bug_report.yml
+include .github/ISSUE_TEMPLATE/feature_request.yml
+include scripts/check_secrets.py
+include scripts/audit_dependencies.py
+include scripts/smoke_wheel.py
+include scripts/verify_artifacts.py
+include tests/test_cli.py
+include tests/test_condition.py
+include tests/test_issue_22.py
+include tests/test_metadata.py
+include tests/test_openrouter.py
+include tests/test_scanner.py
+include tests/test_sdk.py
+include tests/test_sdk_components.py
+include tests/test_semantics.py
+include tests/test_static_security.py
+
+recursive-include nova *.py
+recursive-include scripts *.py
+recursive-include tests *.py
