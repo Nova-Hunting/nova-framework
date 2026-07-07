@@ -73,13 +73,13 @@ jobs:
           python -m pip install -e ".[test,lint]"
 
       - name: Run static checks
-        run: python -m ruff check nova tests scripts test.py
+        run: python -m ruff check nova tests scripts
 
       - name: Run tests
         run: python -m pytest -q
 
       - name: Compile package
-        run: python -m compileall -q nova tests scripts test.py
+        run: python -m compileall -q nova tests scripts
 
   package:
     name: Build package

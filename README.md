@@ -91,6 +91,7 @@ novarun --rule nova-rules/jailbreak.nov \
 ```
 
 Provider-specific model environment variables are also supported, for example `OPENROUTER_LLM_MODEL`, `OPENROUTER_MODEL`, and the fallback `NOVA_LLM_MODEL`.
+For OpenRouter app attribution, set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send the optional `HTTP-Referer` and `X-OpenRouter-Title` headers.
 
 Other LLM providers use the matching credential environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_ENDPOINT`, `GROQ_API_KEY`, and local Ollama via `OLLAMA_HOST`.
 
@@ -111,10 +112,48 @@ novarun --config nova.ini --rule nova-rules/jailbreak.nov --prompt "ignore previ
 
 Explicit CLI flags override config file values, and environment variables override file credentials and model settings. When `--config` is provided, Nova fails fast if the file is missing or malformed.
 
+## Python SDK
+
+Beyond the CLI, Nova ships an SDK for embedding prompt protection directly in applications:
+
+```python
+from nova.sdk import Nova, NovaBlockedError
+
+nova = Nova(
+    rules_path="nova-rules/",
+    policy={"Jailbreak": {"action": "block"}},
+)
+
+@nova.protect(action="block")
+def chat(prompt: str) -> str:
+    return call_your_llm(prompt)
+
+try:
+    chat("ignore previous instructions")
+except NovaBlockedError as blocked:
+    print(blocked.message)
+```
+
+See the [SDK guide](nova/sdk/README.md) for policies, redaction, async support, and debug mode, and the [examples](examples/) directory for runnable integrations.
+
+## Testing
+
+```bash
+pip install -e ".[dev]"
+python -m pytest -q
+```
+
+The full contributor gates (lint, packaging validation, dependency audit) are listed in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Documentation
 
 Full documentation is available at:
 - [Nova Documentation](https://github.com/Nova-Hunting/nova-doc)
+
+In this repository:
+- [INSTALLATION.md](INSTALLATION.md) — installation, provider configuration, and troubleshooting
+- [ARCHITECTURE.md](ARCHITECTURE.md) — project layout and the detection pipeline
+- [SDK guide](nova/sdk/README.md) — embedding Nova in applications
 
 For production-like adoption, review [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for supported surfaces, required gates, provider smoke-test guidance, and known operational risks.
 

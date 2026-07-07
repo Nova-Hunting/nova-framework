@@ -265,6 +265,7 @@ nova = Nova(
 ```
 
 When `llm_model` is omitted, Nova checks provider-specific model environment variables such as `OPENROUTER_LLM_MODEL` and `OPENROUTER_MODEL`, then falls back to `NOVA_LLM_MODEL` and the provider default.
+For OpenRouter app attribution, set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to include the optional `HTTP-Referer` and `X-OpenRouter-Title` request headers.
 
 ---
 

@@ -1,3 +1,5 @@
+import builtins
+import importlib
 import os
 import subprocess
 import sys
@@ -66,6 +68,25 @@ def test_novarun_help_lists_openrouter():
 
     assert result.returncode == 0
     assert "openrouter" in result.stdout
+
+
+def test_novarun_import_does_not_load_optional_transformers(monkeypatch):
+    original_import = builtins.__import__
+    blocked_imports = []
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "transformers" or name.startswith("transformers.") or name == "torch" or name.startswith("torch."):
+            blocked_imports.append(name)
+            raise AssertionError(f"Unexpected optional import at CLI startup: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "nova.novarun", raising=False)
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    module = importlib.import_module("nova.novarun")
+
+    assert hasattr(module, "main")
+    assert blocked_imports == []
 
 
 def test_novarun_keyword_rule_matches_without_llm(tmp_path):

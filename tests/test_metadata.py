@@ -17,6 +17,11 @@ def test_release_docs_reference_current_version():
 
     assert f"## [{__version__}]" in changelog
     assert f"v{__version__}" in release_notes.splitlines()[0]
+    assert "OPENROUTER_HTTP_REFERER" in changelog
+    assert "OPENROUTER_APP_TITLE" in changelog
+    assert "optional `transformers` or `torch` packages" in changelog
+    assert "optional app attribution headers" in release_notes
+    assert "optional `transformers` or `torch` packages" in release_notes
 
 
 def test_tooling_dependencies_are_not_runtime_requirements():
@@ -77,6 +82,8 @@ def test_public_docs_describe_openrouter_and_current_dev_gates():
     assert "missing or malformed" in readme
     assert "PRODUCTION_READINESS.md" in readme
     assert "OPENROUTER_LLM_MODEL" in installation
+    assert "OPENROUTER_HTTP_REFERER" in readme
+    assert "OPENROUTER_APP_TITLE" in installation
     assert "GROQ_API_KEY" in installation
     assert "AZURE_OPENAI_ENDPOINT" in installation
     assert "GROQ_MODEL" in installation
@@ -85,8 +92,9 @@ def test_public_docs_describe_openrouter_and_current_dev_gates():
     assert "missing or malformed" in installation
     assert "OLLAMA_HOST" in readme
     assert 'llm_provider="openrouter"' in sdk_readme
-    assert "python -m ruff check nova tests scripts test.py" in installation
-    assert "python -m compileall -q nova tests scripts test.py" in installation
+    assert "X-OpenRouter-Title" in sdk_readme
+    assert "python -m ruff check nova tests scripts" in installation
+    assert "python -m compileall -q nova tests scripts" in installation
     assert "python scripts/audit_dependencies.py" in installation
     assert "python scripts/check_secrets.py" in installation
     assert "python scripts/verify_artifacts.py" in installation
@@ -161,7 +169,7 @@ def test_production_readiness_document_covers_operational_risks_and_gates():
         "NOVA is beta software",
         "Supported Surfaces",
         "Required Gates",
-        "python -m ruff check nova tests scripts test.py",
+        "python -m ruff check nova tests scripts",
         "python scripts/audit_dependencies.py",
         "python scripts/check_secrets.py",
         "python scripts/verify_artifacts.py",
@@ -169,6 +177,8 @@ def test_production_readiness_document_covers_operational_risks_and_gates():
         "GitHub Actions CI",
         "CodeQL",
         "OpenRouter",
+        "OPENROUTER_HTTP_REFERER",
+        "OPENROUTER_APP_TITLE",
         "openai/gpt-5.2",
         "semantic",
         "fail closed",
@@ -182,8 +192,8 @@ def test_production_readiness_document_covers_operational_risks_and_gates():
 def test_pull_request_template_lists_required_local_gates():
     template = Path(".github/PULL_REQUEST_TEMPLATE.md").read_text(encoding="utf-8")
 
-    assert "python -m ruff check nova tests scripts test.py" in template
-    assert "python -m compileall -q nova tests scripts test.py" in template
+    assert "python -m ruff check nova tests scripts" in template
+    assert "python -m compileall -q nova tests scripts" in template
     assert "python -m pytest -q" in template
     assert "python scripts/audit_dependencies.py" in template
     assert "python scripts/check_secrets.py" in template
@@ -218,9 +228,9 @@ def test_ci_workflow_covers_supported_versions_and_release_gates():
         step.get("run", "")
         for step in jobs["test"]["steps"]
     )
-    assert "python -m ruff check nova tests scripts test.py" in test_runs
+    assert "python -m ruff check nova tests scripts" in test_runs
     assert "python -m pytest -q" in test_runs
-    assert "python -m compileall -q nova tests scripts test.py" in test_runs
+    assert "python -m compileall -q nova tests scripts" in test_runs
 
     package_runs = "\n".join(
         step.get("run", "")

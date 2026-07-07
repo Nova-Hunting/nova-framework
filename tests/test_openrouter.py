@@ -50,8 +50,10 @@ def test_openrouter_model_alias_selection(monkeypatch):
     assert evaluator.model == "meta-llama/llama-3.1-8b-instruct"
 
 
-def test_openrouter_evaluate_prompt_uses_openrouter_endpoint_without_attribution_headers():
+def test_openrouter_evaluate_prompt_uses_openrouter_endpoint_without_attribution_headers(monkeypatch):
     clear_llm_cache()
+    monkeypatch.delenv("OPENROUTER_HTTP_REFERER", raising=False)
+    monkeypatch.delenv("OPENROUTER_APP_TITLE", raising=False)
     calls = []
 
     class FakeResponse:
@@ -93,6 +95,96 @@ def test_openrouter_evaluate_prompt_uses_openrouter_endpoint_without_attribution
     assert "HTTP-Referer" not in kwargs["headers"]
     assert "X-OpenRouter-Title" not in kwargs["headers"]
     assert kwargs["json"]["model"] == "openai/gpt-5.2"
+
+
+def test_openrouter_evaluate_prompt_uses_optional_attribution_headers():
+    clear_llm_cache()
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({
+                                "matched": False,
+                                "confidence": 0.12,
+                                "reason": "did not match test condition",
+                            })
+                        }
+                    }
+                ]
+            }
+
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return FakeResponse()
+
+    evaluator = OpenRouterEvaluator(
+        api_key="test-openrouter-key",
+        model="openai/gpt-5.2",
+        http_referer="https://example.test",
+        app_title="NOVA Test",
+    )
+    evaluator.session = FakeSession()
+
+    matched, confidence, details = evaluator.evaluate_prompt("Detect policy violations", "unique attribution text")
+
+    assert matched is False
+    assert confidence == 0.12
+    assert details["evaluator_type"] == "openrouter"
+
+    _, kwargs = calls[0]
+    assert kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
+    assert kwargs["headers"]["HTTP-Referer"] == "https://example.test"
+    assert kwargs["headers"]["X-OpenRouter-Title"] == "NOVA Test"
+
+
+def test_openrouter_evaluate_prompt_uses_env_attribution_headers(monkeypatch):
+    clear_llm_cache()
+    monkeypatch.setenv("OPENROUTER_HTTP_REFERER", "https://env.example.test")
+    monkeypatch.setenv("OPENROUTER_APP_TITLE", "NOVA Env Test")
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({
+                                "matched": True,
+                                "confidence": 0.73,
+                                "reason": "matched env attribution test condition",
+                            })
+                        }
+                    }
+                ]
+            }
+
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return FakeResponse()
+
+    evaluator = OpenRouterEvaluator(api_key="test-openrouter-key", model="openai/gpt-5.2")
+    evaluator.session = FakeSession()
+
+    matched, confidence, details = evaluator.evaluate_prompt("Detect policy violations", "unique env attribution text")
+
+    assert matched is True
+    assert confidence == 0.73
+    assert details["evaluator_type"] == "openrouter"
+
+    _, kwargs = calls[0]
+    assert kwargs["headers"]["HTTP-Referer"] == "https://env.example.test"
+    assert kwargs["headers"]["X-OpenRouter-Title"] == "NOVA Env Test"
 
 
 def test_openrouter_cache_is_scoped_by_temperature():

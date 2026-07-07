@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SDIST_REQUIRED_FILES = {
     "LICENCE",
     "README.md",
+    "ARCHITECTURE.md",
     "CHANGELOG.md",
     "RELEASE_NOTES.md",
     "INSTALLATION.md",
@@ -38,6 +39,7 @@ SDIST_REQUIRED_FILES = {
     "tests/test_openrouter.py",
     "tests/test_scanner.py",
     "tests/test_sdk.py",
+    "tests/test_sdk_components.py",
     "tests/test_semantics.py",
     "tests/test_static_security.py",
     "nova/_version.py",

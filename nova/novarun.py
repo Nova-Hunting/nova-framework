@@ -13,19 +13,6 @@ Description: Command-line tool for running Nova rules against prompts
 import warnings
 warnings.filterwarnings("ignore", message=".*clean_up_tokenization_spaces.*")
 
-# Set transformers tokenization settings at the very beginning
-# This must be before any imports to prevent FutureWarning
-try:
-    import transformers
-    # Explicitly set the tokenization spaces parameter to prevent FutureWarning
-    if hasattr(transformers, 'tokenization_utils_base'):
-        transformers.tokenization_utils_base.CLEAN_UP_TOKENIZATION_SPACES = True
-    if hasattr(transformers, 'PreTrainedTokenizerBase'):
-        transformers.PreTrainedTokenizerBase.clean_up_tokenization_spaces = True
-except ImportError:
-    # Transformers not available - that's OK for basic keyword matching
-    pass
-
 import argparse
 import os
 import sys

@@ -1,5 +1,26 @@
 # NOVA Framework Changelog
 
+## [0.3.0] - 2026-07-07
+
+### Added
+- Added optional OpenRouter app attribution headers through `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` environment variables, or the `http_referer` and `app_title` `OpenRouterEvaluator` constructor arguments.
+- Added `ARCHITECTURE.md` describing the repository layout, detection pipeline, and configuration precedence.
+- Added a troubleshooting guide to `INSTALLATION.md`.
+- Added SDK quick-start and testing sections to `README.md`.
+
+### Fixed
+- Fixed CLI startup so keyword-only scans and `novarun --help` do not import optional `transformers` or `torch` packages.
+
+### Changed
+- Restructured `nova/evaluators/llm.py` (1,372 lines) into the `nova/evaluators/llm/` package with per-provider modules and shared cache/session infrastructure. All public imports from `nova.evaluators.llm` are unchanged.
+- Moved `NovaRuleFileParser` into `nova/core/rule_file.py`; it remains importable from `nova.core.parser`.
+- Split `tests/test_sdk.py` into `tests/test_sdk.py` (engine, decorator, async, debug) and `tests/test_sdk_components.py` (policy, scan results, redaction).
+
+### Removed
+- Removed legacy manual test harnesses that predated the pytest suite: `tests/novatest.py`, `tests/novatester.py`, `tests/testerror.py`, `tests/validateerror.py`, and `tests/prompts_testing.txt`.
+- Removed the obsolete root `test.py` scratch script (it referenced a nonexistent rules path and private matcher APIs) and dropped it from the lint/compile gates in CI and documentation.
+- Removed the unused `first.gif` asset.
+
 ## [0.2.1] - 2026-05-15
 
 ### Added

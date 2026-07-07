@@ -4,8 +4,8 @@ Describe the change and why it is needed.
 
 ## Validation
 
-- [ ] `python -m ruff check nova tests scripts test.py`
-- [ ] `python -m compileall -q nova tests scripts test.py`
+- [ ] `python -m ruff check nova tests scripts`
+- [ ] `python -m compileall -q nova tests scripts`
 - [ ] `python -m pytest -q`
 - [ ] `python scripts/audit_dependencies.py`
 - [ ] `python scripts/check_secrets.py`

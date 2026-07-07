@@ -101,6 +101,8 @@ For local Ollama, set `OLLAMA_HOST` if it is not available at `http://localhost:
 
 Provider-specific model overrides are supported with `OPENAI_LLM_MODEL`, `ANTHROPIC_LLM_MODEL`, `AZURE_OPENAI_LLM_MODEL`, `GROQ_LLM_MODEL`, `OLLAMA_LLM_MODEL`, and `OPENROUTER_LLM_MODEL`. Provider aliases such as `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_MODEL`, `GROQ_MODEL`, `OLLAMA_MODEL`, and `OPENROUTER_MODEL` are also accepted, with `NOVA_LLM_MODEL` as a shared fallback.
 
+OpenRouter app attribution headers are optional. Set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send `HTTP-Referer` and `X-OpenRouter-Title` with OpenRouter requests.
+
 The CLI also accepts a config file for provider defaults and credentials:
 
 ```ini
@@ -131,8 +133,8 @@ pip install -e ".[dev]"
 Run tests:
 
 ```bash
-python -m ruff check nova tests scripts test.py
-python -m compileall -q nova tests scripts test.py
+python -m ruff check nova tests scripts
+python -m compileall -q nova tests scripts
 python -m pytest -q
 python scripts/audit_dependencies.py
 python scripts/check_secrets.py
@@ -141,3 +143,25 @@ python -m twine check dist/*
 python scripts/verify_artifacts.py
 python scripts/smoke_wheel.py
 ```
+
+## Troubleshooting
+
+**`semantics:` rules report degraded coverage or fail closed.**
+The semantic ML stack is an optional extra. Install it with `pip install "nova-hunting[semantic]"` (requires Python 3.10+). The first semantic scan downloads the embedding model, which needs network access.
+
+**`ValueError: OPENAI_API_KEY not set ...` (or the equivalent for another provider).**
+Rules with `llm:` patterns need credentials for the provider selected with `--llm`. Export the matching key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`) or pass a config file with `--config`. Nova intentionally does not fall back to another provider.
+
+**`Could not connect to Ollama at http://localhost:11434`.**
+Start the Ollama service (`ollama serve`) or point `OLLAMA_HOST` at the correct host and port.
+
+**`novarun --config` fails with "missing or malformed".**
+When `--config` is passed explicitly, Nova fails fast rather than silently using defaults. Check the INI syntax against the example above and confirm the file path.
+
+**A rule fails to parse with `NovaParserError`.**
+The parser fails closed on unknown sections, duplicate or malformed variable names, and conditions referencing undefined variables. The error message includes the rule number and source file. Validate new rules with a keyword-only scan first: `novarun --rule myrule.nov --prompt "test"`.
+
+**The CLI feels slow on keyword-only rules.**
+Keyword-only scans do not need ML or LLM dependencies and skip them entirely. If startup is slow, check that you are not importing the `semantic` stack elsewhere; `novarun --help` and keyword scans avoid importing `transformers`/`torch`.
+
+For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).

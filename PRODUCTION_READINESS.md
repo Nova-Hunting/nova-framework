@@ -20,8 +20,8 @@ The current release gates cover:
 Run these local gates from a clean checkout before tagging or adopting a build:
 
 ```bash
-python -m ruff check nova tests scripts test.py
-python -m compileall -q nova tests scripts test.py
+python -m ruff check nova tests scripts
+python -m compileall -q nova tests scripts
 python -m pytest -q
 python scripts/audit_dependencies.py
 python scripts/check_secrets.py
@@ -44,7 +44,7 @@ For release candidates, also verify these external gates before publishing:
 
 Provider smoke tests must be optional because they require live credentials and may incur cost. Use temporary API keys, avoid printing key material, and rotate keys after live verification.
 
-For OpenRouter, a minimal smoke test should exercise Nova's evaluator path with `OPENROUTER_API_KEY`, the OpenRouter endpoint `https://openrouter.ai/api/v1/chat/completions`, and a current model such as `openai/gpt-5.2`.
+For OpenRouter, a minimal smoke test should exercise Nova's evaluator path with `OPENROUTER_API_KEY`, the OpenRouter endpoint `https://openrouter.ai/api/v1/chat/completions`, optional attribution headers from `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE`, and a current model such as `openai/gpt-5.2`.
 
 ## Risk Register
 

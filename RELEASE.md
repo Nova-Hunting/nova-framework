@@ -10,8 +10,8 @@ NOVA is in beta. Releases should favor correctness, clear changelogs, and reprod
 4. Run the local gates:
 
 ```bash
-python -m ruff check nova tests scripts test.py
-python -m compileall -q nova tests scripts test.py
+python -m ruff check nova tests scripts
+python -m compileall -q nova tests scripts
 python -m pytest -q
 python scripts/audit_dependencies.py
 python scripts/check_secrets.py

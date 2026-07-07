@@ -1,5 +1,6 @@
 include README.md
 include LICENCE
+include ARCHITECTURE.md
 include CHANGELOG.md
 include RELEASE_NOTES.md
 include INSTALLATION.md
@@ -26,6 +27,7 @@ include tests/test_metadata.py
 include tests/test_openrouter.py
 include tests/test_scanner.py
 include tests/test_sdk.py
+include tests/test_sdk_components.py
 include tests/test_semantics.py
 include tests/test_static_security.py
 

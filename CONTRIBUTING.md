@@ -16,8 +16,8 @@ python -m pip install -e ".[dev]"
 Run these before opening a pull request:
 
 ```bash
-python -m ruff check nova tests scripts test.py
-python -m compileall -q nova tests scripts test.py
+python -m ruff check nova tests scripts
+python -m compileall -q nova tests scripts
 python -m pytest -q
 python scripts/audit_dependencies.py
 python scripts/check_secrets.py
@@ -45,9 +45,9 @@ Do not open public issues for vulnerabilities. Follow `SECURITY.md` for private 
 ## Pull Request Checklist
 
 - [ ] Tests cover the changed behavior.
-- [ ] `python -m ruff check nova tests scripts test.py` passes.
+- [ ] `python -m ruff check nova tests scripts` passes.
 - [ ] `python -m pytest -q` passes.
-- [ ] `python -m compileall -q nova tests scripts test.py` passes.
+- [ ] `python -m compileall -q nova tests scripts` passes.
 - [ ] `python scripts/audit_dependencies.py` passes.
 - [ ] `python scripts/check_secrets.py` passes.
 - [ ] `python -m build` succeeds.
