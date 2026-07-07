@@ -1,6 +1,6 @@
 # Contributing to NOVA
 
-Thanks for helping improve NOVA. This project is a beta security-adjacent engine, so changes should be easy to review, covered by focused tests, and careful about compatibility.
+Thanks for helping improve NOVA. This project is a production security-adjacent engine, so changes should be easy to review, covered by focused tests, and careful about compatibility.
 
 ## Development Setup
 

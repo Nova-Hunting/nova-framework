@@ -1,6 +1,7 @@
 # Nova Hunting v0.3.0 Release Notes
 
 ## Highlights
+- Promoted NOVA from beta to production/stable status, reflecting the hardened fail-closed engine, full CI/security gates, and stability guarantees established over the 0.2.x series.
 - Added optional app attribution headers for OpenRouter: set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send `HTTP-Referer` and `X-OpenRouter-Title` with OpenRouter requests, or pass `http_referer` / `app_title` to `OpenRouterEvaluator`.
 - Fixed CLI startup so keyword-only scans and `novarun --help` do not import optional `transformers` or `torch` packages.
 - Restructured the LLM evaluator module into a per-provider package (`nova/evaluators/llm/`) and moved the multi-rule file parser into `nova/core/rule_file.py`. All public import paths, including `nova.evaluators.llm` and `nova.core.parser`, are unchanged.

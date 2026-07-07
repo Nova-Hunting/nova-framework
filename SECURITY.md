@@ -1,15 +1,15 @@
 # Security Policy
 
-NOVA is a beta security-adjacent engine. Treat findings that could affect scanner correctness, rule evaluation, package integrity, secret handling, or remote provider interactions as security-sensitive.
+NOVA is a production security-adjacent engine. Treat findings that could affect scanner correctness, rule evaluation, package integrity, secret handling, or remote provider interactions as security-sensitive.
 
 ## Supported Versions
 
-While NOVA is in beta, security fixes are handled for:
+Security fixes are handled for:
 
 - the `main` branch
 - the latest published `nova-hunting` package version
 
-Older beta versions may not receive backported fixes.
+Older versions may not receive backported fixes.
 
 ## Reporting a Vulnerability
 

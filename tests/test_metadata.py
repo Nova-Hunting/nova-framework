@@ -166,7 +166,7 @@ def test_production_readiness_document_covers_operational_risks_and_gates():
     readiness = Path("PRODUCTION_READINESS.md").read_text(encoding="utf-8")
 
     for expected in [
-        "NOVA is beta software",
+        "NOVA is production-ready software",
         "Supported Surfaces",
         "Required Gates",
         "python -m ruff check nova tests scripts",

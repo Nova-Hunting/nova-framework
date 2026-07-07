@@ -1,6 +1,6 @@
 # Release Checklist
 
-NOVA is in beta. Releases should favor correctness, clear changelogs, and reproducible artifacts over speed.
+Releases should favor correctness, clear changelogs, and reproducible artifacts over speed.
 
 ## Pre-Release
 

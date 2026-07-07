@@ -1,6 +1,6 @@
 # Production Readiness
 
-NOVA is beta software. This document defines the checks and operating assumptions required before using a specific commit or package version in a production-like environment. Passing these checks improves confidence, but it is not a service-level agreement and it does not guarantee complete prompt attack coverage.
+NOVA is production-ready software as of v0.3.0. This document defines the checks and operating assumptions required before deploying a specific commit or package version in a production environment. Passing these checks improves confidence, but it is not a service-level agreement and it does not guarantee complete prompt attack coverage.
 
 ## Supported Surfaces
 

@@ -12,6 +12,7 @@
 - Fixed CLI startup so keyword-only scans and `novarun --help` do not import optional `transformers` or `torch` packages.
 
 ### Changed
+- Promoted the package development status from Beta to Production/Stable and removed beta disclaimers from the README, documentation, and governance docs.
 - Restructured `nova/evaluators/llm.py` (1,372 lines) into the `nova/evaluators/llm/` package with per-provider modules and shared cache/session infrastructure. All public imports from `nova.evaluators.llm` are unchanged.
 - Moved `NovaRuleFileParser` into `nova/core/rule_file.py`; it remains importable from `nova.core.parser`.
 - Split `tests/test_sdk.py` into `tests/test_sdk.py` (engine, decorator, async, debug) and `tests/test_sdk_components.py` (policy, scan results, redaction).
