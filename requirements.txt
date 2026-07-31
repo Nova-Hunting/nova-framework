@@ -26,5 +26,6 @@ build~=1.2.2
 twine~=6.2.0
 
 # Documentation (optional, for building docs locally)
-mkdocs~=1.5.3
-mkdocs-material~=9.5.9
+mkdocs~=1.6.1
+mkdocs-material~=9.7.7
+pymdown-extensions~=11.0

@@ -2,6 +2,9 @@
 
 ## [0.3.0] - 2026-07-07
 
+### Security
+- Updated the `docs` extra to `mkdocs~=1.6.1` and `mkdocs-material~=9.7.7`, and added an explicit `pymdown-extensions~=11.0` floor so documentation builds cannot resolve versions vulnerable to CVE-2026-61632. Runtime dependencies were never affected.
+
 ### Added
 - Added optional OpenRouter app attribution headers through `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` environment variables, or the `http_referer` and `app_title` `OpenRouterEvaluator` constructor arguments.
 - Added `ARCHITECTURE.md` describing the repository layout, detection pipeline, and configuration precedence.
