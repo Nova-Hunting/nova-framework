@@ -89,24 +89,35 @@ class AnthropicEvaluator(LLMEvaluator):
             )
 
             # Call the Anthropic API using the shared session
-            response = self.session.post(
-                self.base_url,
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": self.model,
-                    "system": system_prompt,
-                    "messages": [
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": temperature,  # Use the provided temperature
-                    "max_tokens": 200
-                },
-                timeout=15  # Longer timeout for Anthropic API
+            headers = {
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+            payload = {
+                "model": self.model,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": temperature,  # Use the provided temperature
+                "max_tokens": 200
+            }
+            response = self.session.post(self.base_url, headers=headers, json=payload, timeout=15)
+
+            rejects_temperature = (
+                response.status_code == 400 and "temperature" in response.text and "deprecated" in response.text
             )
+            if rejects_temperature:
+                # Model rejects the temperature field outright (e.g. fixed-decoding reasoning models).
+                logger.warning(
+                    f"[Anthropic] Model '{self.model}' does not support 'temperature'; "
+                    f"dropping it and retrying (rule threshold {temperature} will not apply)."
+                )
+                payload.pop("temperature")
+                response = self.session.post(self.base_url, headers=headers, json=payload, timeout=15)
+
+            applied_temperature = None if rejects_temperature else temperature
 
             # Process the response
             if response.status_code == 200:
@@ -129,7 +140,7 @@ class AnthropicEvaluator(LLMEvaluator):
                         evaluation["model"] = self.model
                         evaluation["api_status"] = "success"
                         evaluation["evaluator_type"] = "anthropic"
-                        evaluation["temperature"] = temperature  # Include the temperature used
+                        evaluation["temperature"] = applied_temperature  # None if the model rejected a custom value
 
                         return matched, confidence, evaluation
                     else:
