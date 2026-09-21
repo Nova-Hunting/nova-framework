@@ -22,7 +22,7 @@ from colorama import Fore, Back
 
 # Import Nova components
 try:
-    from nova.core.parser import NovaParser, NovaRuleFileParser
+    from nova.core.parser import NovaParser, NovaRuleFileParser, NovaParserError
     from nova.core.matcher import NovaMatcher
     from nova.utils.config import get_config
     from nova.evaluators.llm import get_validated_evaluator
@@ -520,6 +520,49 @@ def print_prompts_summary(results: List[Dict[str, Any]], prompts: List[str]):
         print(f"{Fore.WHITE}{i+1:<4} {result_text:<27} {Fore.YELLOW}{display_prompt}")
 
 
+def run_jev_cli(args, parser, blocks, prompts):
+    """Use the shared scanner for Jev rules, preserving legacy CLI output elsewhere."""
+    import json
+    from nova.core.scanner import NovaScanner
+    from nova.core.jev import NovaEvaluationError
+    from nova.evaluators.jev.config import JevConfig
+    from nova.evaluators.jev.state import snapshot_state
+
+    options = {}
+    if args.jev_enabled is not None:
+        options["enabled"] = args.jev_enabled
+    if args.jev_model is not None:
+        options["model"] = args.jev_model
+    try:
+        config = JevConfig.resolve(options)
+        rules = [NovaParser().parse(block) for block in (blocks[:1] if args.single else blocks)]
+        context = None
+        if args.jev_state:
+            with open(args.jev_state, encoding="utf-8") as stream:
+                payload = stream.read(config.max_request_bytes + 1)
+            if len(payload.encode("utf-8")) > config.max_request_bytes:
+                raise ValueError("Jev context exceeds request size limit")
+            context = json.loads(payload)
+            snapshot_state("", context, config.max_request_bytes)
+        scanner = NovaScanner(rules, llm_type=args.llm, llm_model=args.model, jev_config=config)
+    except (ValueError, OSError, NovaParserError) as error:
+        parser.error(str(error))
+    incomplete = False
+    for index, prompt in enumerate(prompts):
+        try:
+            details = scanner.scan_with_details(prompt, jev_state=context)
+        except NovaEvaluationError as error:
+            details = error.partial_result
+            incomplete = True
+            print(f"Incomplete evaluation: {', '.join(sorted(set(error.causes)))}")
+        # No prompt/context or credentials in default output. Evidence remains inspectable.
+        print(json.dumps({"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
+                          "matches": details.get("matches", []), "jev_results": details.get("jev_results", {})},
+                         ensure_ascii=False, indent=2))
+    if incomplete:
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the novarun tool."""
     parser = argparse.ArgumentParser(
@@ -543,6 +586,13 @@ def main():
     # Keep the -a/--all flag for backward compatibility, but make it a no-op (all rules is now default)
     parser.add_argument('-a', '--all', action='store_true', help='Check against all rules in the file (default behavior)')
     
+    jev_group = parser.add_mutually_exclusive_group()
+    jev_group.add_argument('--jev', dest='jev_enabled', action='store_true', default=None,
+                           help='Enable remote Jev decisions through OpenRouter')
+    jev_group.add_argument('--skip-jev', dest='jev_enabled', action='store_false',
+                           help='Disable Jev; unresolved required checks are errors')
+    parser.add_argument('--jev-model', help='OpenRouter Decisions model (independent of --model)')
+    parser.add_argument('--jev-state', metavar='FILE', help='JSON context for Jev; paired with each prompt')
     args = parser.parse_args()
     
     try:
@@ -568,7 +618,14 @@ def main():
         print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
     
     # Check if the file contains multiple rules using the shared rule-file extractor.
-    rule_blocks = extract_rules(file_content)
+    try:
+        rule_blocks = extract_rules(file_content)
+    except NovaParserError as e:
+        print(f"{Fore.RED}Error parsing rule file: {e}")
+        sys.exit(1)
+    from nova.core.structure import sections
+    if any("jev" in sections(block)[1] for block in rule_blocks):
+        return run_jev_cli(args, parser, rule_blocks, prompts)
     if not args.single and len(rule_blocks) > 1:
         # Extract all rules from the file
         if not rule_blocks:

@@ -46,6 +46,7 @@ from .policy import NovaPolicy, PolicyRule, Action
 from .redaction import Redactor, RedactionResult
 from .exceptions import (
     NovaSDKError,
+    NovaEvaluationError,
     NovaBlockedError,
     NovaConfigError,
     NovaRedactionError,
@@ -78,6 +79,8 @@ __all__ = [
 
     # Exceptions
     "NovaSDKError",
+    "NovaEvaluationError",
+    "JevConfig",
     "NovaBlockedError",
     "NovaConfigError",
     "NovaRedactionError",
@@ -90,3 +93,5 @@ __all__ = [
     "get_default_nova",
     "set_default_nova",
 ]
+
+from nova.evaluators.jev.config import JevConfig

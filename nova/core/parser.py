@@ -62,45 +62,38 @@ class NovaParser:
         Raises:
             NovaParserError: If the rule definition doesn't follow the grammar
         """
-        lines = content.strip().split('\n')
-        rule_start_index = self._find_rule_start_index(lines)
-        
-        # Reset variable tracking
-        self.variable_names = {
-            'keywords': set(),
-            'semantics': set(),
-            'llm': set()
-        }
-        
-        # Check rule declaration and extract name
-        rule_name = self._parse_rule_name(lines[rule_start_index])
-        self.rule = NovaRule(name=rule_name)
-        
-        current_section = None
-        section_content = []
-        
-        # Parse rule content
-        for line in lines[rule_start_index + 1:]:
-            line = line.strip()
-            if self._is_comment_or_blank(line):
-                continue
-                
-            if line.endswith(':'):
-                if current_section:
-                    self._parse_section(current_section, section_content)
-                current_section = line[:-1].strip()
-                section_content = []
-            elif line == '}':
-                if current_section:
-                    self._parse_section(current_section, section_content)
-                break
+        from nova.core.structure import sections
+        from nova.core.jev_parser import parse_jev
+        from nova.evaluators.jev.condition import compile_condition
+
+        try:
+            rule_name, bodies = sections(content)
+            self.rule = NovaRule(name=rule_name)
+            self.variable_names = {name: set() for name in ("keywords", "semantics", "llm", "jev")}
+            for name, (body, offset) in bodies.items():
+                if name == "condition":
+                    continue
+                if name == "jev":
+                    self.rule.jev = parse_jev(body, rule_name, offset)
+                    self.variable_names["jev"] = set(self.rule.jev)
+                else:
+                    self._parse_section(name, body.splitlines())
+            if "condition" not in bodies:
+                raise ValueError(f"Rule '{rule_name}' must have a condition section")
+            condition = bodies["condition"][0]
+            if self.rule.jev:
+                from nova.core.structure import tokenize
+                self.rule.condition = " ".join(t.text for t in tokenize(condition) if t.kind != "newline")
+                # Restore references split by the structural lexer.
+                self.rule.condition = re.sub(r"\s*\.\s*", ".", self.rule.condition)
+                self.rule.condition = re.sub(r"\s*\*", "*", self.rule.condition)
+                compile_condition(self.rule)
             else:
-                section_content.append(line)
-        
-        # Basic validation, with minimal variable checking
-        self._validate_rule_structure()
-        
-        return self.rule
+                self._parse_section("condition", condition.splitlines())
+                self._validate_rule_structure()
+            return self.rule
+        except ValueError as error:
+            raise NovaParserError(str(error)) from error
 
     def _find_rule_start_index(self, lines: List[str]) -> int:
         """Find the first rule declaration, skipping leading blank/comment lines."""

@@ -24,6 +24,7 @@ class RuleMatch:
     semantic_scores: Dict[str, float] = field(default_factory=dict)
     llm_scores: Dict[str, float] = field(default_factory=dict)
     matched_patterns: List[str] = field(default_factory=list)
+    matching_jev: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +54,9 @@ class ScanResult:
     redactions: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     rule_warnings: Dict[str, List[str]] = field(default_factory=dict)
+    jev_results: Dict[str, Any] = field(default_factory=dict)
+    jev_batches: Dict[str, Any] = field(default_factory=dict)
+    evaluation_complete: bool = True
 
     @property
     def blocked(self) -> bool:
@@ -72,12 +76,12 @@ class ScanResult:
     @property
     def allowed(self) -> bool:
         """Returns True if no blocking actions were triggered."""
-        return not self.blocked
+        return self.evaluation_complete and not self.blocked
 
     @property
     def clean(self) -> bool:
         """Returns True if no rules matched at all."""
-        return len(self.matches) == 0
+        return self.evaluation_complete and len(self.matches) == 0
 
     @property
     def highest_severity(self) -> Optional[str]:
@@ -135,7 +139,7 @@ class ScanResult:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary for serialization."""
-        return {
+        result = {
             "blocked": self.blocked,
             "flagged": self.flagged,
             "redacted": self.redacted,
@@ -167,6 +171,13 @@ class ScanResult:
             ],
             "redactions": self.redactions
         }
+        if self.jev_results or not self.evaluation_complete:
+            result.update(jev_results=self.jev_results, jev_batches=self.jev_batches,
+                          evaluation_complete=self.evaluation_complete)
+            for item, match in zip(result["matches"], self.matches):
+                if match.rule_name in self.jev_results:
+                    item["matching_jev"] = match.matching_jev
+        return result
 
     def __bool__(self) -> bool:
         """Returns True if any rules matched."""

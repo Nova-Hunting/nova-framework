@@ -9,6 +9,7 @@ Description: Rule definitions and pattern classes for pattern matching
 
 from dataclasses import dataclass, field
 from typing import Dict
+from nova.core.jev import JevPattern
 
 
 @dataclass
@@ -71,3 +72,4 @@ class NovaRule:
     semantics: Dict[str, SemanticPattern] = field(default_factory=dict)
     llms: Dict[str, LLMPattern] = field(default_factory=dict)
     condition: str = ""
+    jev: Dict[str, JevPattern] = field(default_factory=dict)

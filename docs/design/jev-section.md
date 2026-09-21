@@ -39,7 +39,7 @@ Noul requires both `true` and `false` and a finite threshold in [0,1]. Choice
 requires 2–10 unique options and a nonempty match list naming declared options.
 Score requires 2–10 ordered levels and a finite threshold in [0,N-1]. Optional
 `min_confidence` in [0,1] is only valid on Choice/Score. Unknown or duplicate fields,
-duplicate variables across sections, malformed nesting, and undefined references
+duplicate variables within sections, malformed nesting, and undefined references
 are errors. Conditions support references, wildcards, prefixes, and quantifiers;
 attribute access and arbitrary numeric expressions are not supported.
 
@@ -94,5 +94,5 @@ tests; run existing regression and package gates on Python 3.10–3.13. Opt-in l
 tests require NOVA_JEV_LIVE_TEST=1 and credentials and allow at most three HTTP
 attempts with synthetic inputs. Add Noul/Choice/Score/combined examples, a
 pre-execution agent demo, and a labeled quality-evaluation harness. Thresholds
-are illustrative until measured. Push the branch and open a draft PR; do not
-merge, tag, bump the package version or publish automatically.
+are illustrative until measured. Keep the branch and commits local as requested.
+Do not push, open a PR, merge, tag, bump the package version or publish.
