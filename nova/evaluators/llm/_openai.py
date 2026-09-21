@@ -102,25 +102,39 @@ class OpenAIEvaluator(LLMEvaluator):
             )
 
             # Call the OpenAI API using the shared session
-            response = self.session.post(
-                self.base_url,
-                headers=self._request_headers(),
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a helpful assistant that evaluates text based on the given criteria. "
-                                      "Respond with a JSON object containing 'matched' (boolean), 'confidence' (float 0-1), "
-                                      "and 'reason' (string)."
-                        },
-                        {"role": "user", "content": full_prompt}
-                    ],
-                    "temperature": temperature,  # Use the provided temperature
-                    "response_format": {"type": "json_object"}
-                },
-                timeout=10  # Add timeout for network operations
-            )
+            headers = self._request_headers()
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that evaluates text based on the given criteria. "
+                                  "Respond with a JSON object containing 'matched' (boolean), 'confidence' (float 0-1), "
+                                  "and 'reason' (string)."
+                    },
+                    {"role": "user", "content": full_prompt}
+                ],
+                "temperature": temperature,  # Use the provided temperature
+                "response_format": {"type": "json_object"}
+            }
+            response = self.session.post(self.base_url, headers=headers, json=payload, timeout=10)
+
+            rejects_temperature = False
+            if response.status_code == 400:
+                try:
+                    rejects_temperature = response.json().get("error", {}).get("param") == "temperature"
+                except ValueError:
+                    pass
+            if rejects_temperature:
+                # Model only supports the default temperature (e.g. fixed-decoding reasoning models).
+                logger.warning(
+                    f"[{self.log_label}] Model '{self.model}' does not support a custom 'temperature'; "
+                    f"dropping it and retrying (rule threshold {temperature} will not apply)."
+                )
+                payload.pop("temperature")
+                response = self.session.post(self.base_url, headers=headers, json=payload, timeout=10)
+
+            applied_temperature = None if rejects_temperature else temperature
 
             # Process the response
             if response.status_code == 200:
@@ -137,7 +151,7 @@ class OpenAIEvaluator(LLMEvaluator):
                     evaluation["model"] = self.model
                     evaluation["api_status"] = "success"
                     evaluation["evaluator_type"] = self.evaluator_type
-                    evaluation["temperature"] = temperature  # Include the temperature used
+                    evaluation["temperature"] = applied_temperature  # None if the model rejected a custom value
 
                     # Cache the successful response
                     _cache_response(prompt_template, text, cache_model, temperature, matched, confidence, evaluation)
