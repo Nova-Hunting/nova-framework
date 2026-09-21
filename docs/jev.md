@@ -165,8 +165,10 @@ novarun --rule examples/jev/agent_action_risk.nov \
 
 `--jev-state` reads UTF-8 JSON. With `--file`, each prompt gets its own text paired
 with the supplied context; ensure that context is appropriate for every action.
-Jev CLI output includes typed evidence, match summaries, and completion status,
-without raw text/context. Required runtime failures exit 1; invalid Jev options
+Jev CLI output shows a readable MATCH / NO MATCH / INCOMPLETE heading for each
+rule, followed by each evaluated Noul probability, Score value or selected Choice
+category. Thresholds, confidence requirements and unresolved reasons appear next
+to the evidence. Raw text/context is not printed. Required runtime failures exit 1; invalid Jev options
 or declarations exit 2. `--jev` and `--skip-jev` are mutually exclusive.
 
 Add `--verbose` (or `-v`) to include elapsed time, effective Jev provider/model,
@@ -174,6 +176,9 @@ each rule's condition and outcome, matched predicates, evaluation warnings, and
 batch metadata such as request IDs, HTTP attempt counts and reported usage/cost.
 The extra diagnostics also appear for incomplete evaluations. Verbose output does
 not include the raw prompt, supplied context or credentials.
+
+Use `--json` to retain structured output for scripts (one JSON object per prompt,
+in JSON Lines format). Combine it with `--verbose` for additional diagnostics.
 
 ```ini
 [jev]

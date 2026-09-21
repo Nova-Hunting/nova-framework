@@ -27,7 +27,7 @@ def test_cli_disabled_no_network(monkeypatch, tmp_path, capsys):
         invoke(monkeypatch, tmp_path, ["--prompt", "private-action"])
     assert caught.value.code == 1
     output = capsys.readouterr().out
-    assert "Incomplete evaluation: disabled" in output
+    assert "INCOMPLETE" in output and "Reason: disabled" in output
     assert "private-action" not in output and "synthetic-key" not in output
     request.assert_not_called()
 
@@ -49,7 +49,7 @@ def test_cli_context_batch_model_and_enablement(monkeypatch, tmp_path, capsys):
     prompts.write_text("first\nsecond\n")
     invoke(monkeypatch, tmp_path, ["--file", str(prompts), "--jev", "--jev-model", "explicit-model", "--jev-state", str(state)])
     assert contexts == [{"text": text, "context": {"approved_task": "test"}} for text in ("first", "second")]
-    assert '"noul": 0.8' in capsys.readouterr().out
+    assert "Noul $scope: 0.8" in capsys.readouterr().out
 
 
 def test_cli_invalid_context_or_config_exit_two(monkeypatch, tmp_path):
@@ -95,7 +95,7 @@ def test_verbose_evidence_and_incomplete_diagnostics(monkeypatch, tmp_path, caps
     monkeypatch.setenv("OPENROUTER_API_KEY", "private-api-key-marker")
     context = tmp_path / "context.json"
     context.write_text('{"context": "private-context-marker"}')
-    args = ["--prompt", "private-prompt-marker", "--jev", "--jev-state", str(context)]
+    args = ["--prompt", "private-prompt-marker", "--jev", "--jev-state", str(context), "--json"]
     if verbose:
         args.append("--verbose")
     if confidence < .6:
@@ -120,3 +120,44 @@ def test_verbose_evidence_and_incomplete_diagnostics(monkeypatch, tmp_path, caps
     if confidence < .6:
         assert not output["evaluation_complete"]
         assert "insufficient_confidence" in rule["evaluation_warnings"][0]
+
+
+@pytest.mark.parametrize("verbose,confidence", [(False, .8), (True, .8), (False, .4)])
+def test_readable_output_shows_all_native_results(monkeypatch, tmp_path, capsys, verbose, confidence):
+    fixture = FixtureEvaluator(confidence=confidence, noul=.1)
+    monkeypatch.setattr(OpenRouterJevEvaluator, "evaluate_many", lambda self, patterns, state: fixture.evaluate_many(patterns, state))
+    rules = "\n".join(source(f"jev.${variable}", name=name) for variable, name in
+                       [("scope", "Override"), ("risk", "Impact"), ("operation", "Operation")])
+    args = ["--jev", "--prompt", "private-prompt-marker"] + (["--verbose"] if verbose else [])
+    if confidence < .6:
+        with pytest.raises(SystemExit) as caught:
+            invoke(monkeypatch, tmp_path, args, rules)
+        assert caught.value.code == 1
+    else:
+        invoke(monkeypatch, tmp_path, args, rules)
+    output = capsys.readouterr().out
+    assert "NO MATCH  Override" in output
+    assert "Noul $scope: 0.1  |  NO MATCH  |  threshold 0.7" in output
+    assert "Score $risk: 2" in output
+    assert "Choice $operation: write" in output
+    assert "private-prompt-marker" not in output
+    assert '"jev_results"' not in output and "null" not in output
+    if confidence < .6:
+        assert "INCOMPLETE  Impact" in output
+        assert "INCOMPLETE  Operation" in output
+        assert "Reason: insufficient confidence" in output
+    else:
+        assert "MATCH  Impact" in output and "MATCH  Operation" in output
+    assert ("Condition:" in output) is verbose
+    assert ("Probabilities:" in output) is False  # This fixture has no probabilities.
+
+
+def test_json_batch_is_machine_readable(monkeypatch, tmp_path, capsys):
+    fixture = FixtureEvaluator()
+    monkeypatch.setattr(OpenRouterJevEvaluator, "evaluate_many", lambda self, patterns, state: fixture.evaluate_many(patterns, state))
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text("first\nsecond\n")
+    invoke(monkeypatch, tmp_path, ["--jev", "--file", str(prompts), "--json"])
+    outputs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [output["prompt_index"] for output in outputs] == [0, 1]
+    assert all(output["jev_results"]["Risk"]["$scope"]["answer"]["noul"] == .8 for output in outputs)

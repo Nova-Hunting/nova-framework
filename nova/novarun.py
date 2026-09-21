@@ -551,17 +551,21 @@ def run_jev_cli(args, parser, blocks, prompts):
     incomplete = False
     for index, prompt in enumerate(prompts):
         started = time.perf_counter()
+        causes = []
         try:
             details = scanner.scan_with_details(prompt, jev_state=context)
         except NovaEvaluationError as error:
             details = error.partial_result
             incomplete = True
-            print(f"Incomplete evaluation: {', '.join(sorted(set(error.causes)))}")
+            causes = error.causes
         # No prompt/context or credentials in default output. Evidence remains inspectable.
         output = {"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
                   "matches": details.get("matches", []), "jev_results": details.get("jev_results", {})}
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if causes:
+            output["errors"] = sorted(set(causes))
         if args.verbose:
-            output["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
+            output["elapsed_ms"] = round(elapsed_ms, 3)
             output["jev_config"] = {"enabled": config.enabled, "provider": config.provider, "model": config.model}
             output["rule_details"] = {}
             for name, result in details.get("detailed_results", {}).items():
@@ -577,7 +581,11 @@ def run_jev_cli(args, parser, blocks, prompts):
                     "evaluation_warnings": debug.get("evaluation_warnings", []),
                     "jev_batches": result.get("jev_batches", []),
                 }
-        print(json.dumps(output, ensure_ascii=False, indent=2))
+        if args.json:
+            print(json.dumps(output, ensure_ascii=False))
+        else:
+            from nova.utils.jev_output import format_jev_output
+            print(format_jev_output(details, index, elapsed_ms, config, args.verbose, causes))
     if incomplete:
         sys.exit(1)
 
@@ -612,6 +620,7 @@ def main():
                            help='Disable Jev; unresolved required checks are errors')
     parser.add_argument('--jev-model', help='OpenRouter Decisions model (independent of --model)')
     parser.add_argument('--jev-state', metavar='FILE', help='JSON context for Jev; paired with each prompt')
+    parser.add_argument('--json', action='store_true', help='Emit Jev results as JSON Lines instead of a readable summary')
     args = parser.parse_args()
     
     try:
@@ -634,7 +643,8 @@ def main():
         if not prompts:
             print(f"{Fore.RED}No valid prompts found in {args.file}")
             sys.exit(1)
-        print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
+        if not args.json:
+            print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
     
     # Check if the file contains multiple rules using the shared rule-file extractor.
     try:
@@ -645,6 +655,8 @@ def main():
     from nova.core.structure import sections
     if any("jev" in sections(block)[1] for block in rule_blocks):
         return run_jev_cli(args, parser, rule_blocks, prompts)
+    if args.json:
+        parser.error("--json currently requires a rule file with a jev section")
     if not args.single and len(rule_blocks) > 1:
         # Extract all rules from the file
         if not rule_blocks:
