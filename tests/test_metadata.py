@@ -120,6 +120,7 @@ def test_release_artifact_manifest_and_verifier_cover_governance_files():
     verifier = Path("scripts/verify_artifacts.py").read_text(encoding="utf-8")
 
     for expected in [
+        "nova/sdk/README.md",
         "SECURITY.md",
         "CONTRIBUTING.md",
         "PRODUCTION_READINESS.md",

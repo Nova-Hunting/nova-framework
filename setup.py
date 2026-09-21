@@ -24,7 +24,7 @@ requirements = [
 semantic_requirements = [
     # Current safe semantic stack requires Python 3.10+, matching NOVA's runtime floor.
     "sentence-transformers~=5.5.0; python_version >= '3.10'",
-    "transformers~=5.8.1; python_version >= '3.10'",
+    "transformers~=5.10.0; python_version >= '3.10'",
 ]
 
 test_requirements = [

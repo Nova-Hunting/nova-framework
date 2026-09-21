@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SDIST_REQUIRED_FILES = {
+    "nova/sdk/README.md",
     "LICENCE",
     "README.md",
     "ARCHITECTURE.md",
@@ -47,6 +48,7 @@ SDIST_REQUIRED_FILES = {
 }
 
 WHEEL_REQUIRED_FILES = {
+    "nova/sdk/README.md",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
 }

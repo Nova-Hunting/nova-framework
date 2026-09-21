@@ -1,5 +1,15 @@
 # NOVA Framework Changelog
 
+## [0.3.1] - 2026-09-21
+
+### Security
+- Raised the optional semantic dependency to `transformers~=5.10.0` to exclude versions affected by CVE-2026-9856.
+- Includes the documentation dependency updates to `mkdocs~=1.6.1`, `mkdocs-material~=9.7.7`, and `pymdown-extensions~=11.0`, excluding versions affected by CVE-2026-73295 and CVE-2026-61632.
+
+### Fixed
+- Included `nova/sdk/README.md` in source and wheel distributions so the SDK guide ships with the package and the source distribution's metadata tests can run.
+- Added the SDK guide to required artifact contents to catch future packaging omissions.
+
 ## [0.3.0] - 2026-07-07
 
 ### Security
