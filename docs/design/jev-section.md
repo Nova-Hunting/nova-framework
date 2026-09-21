@@ -96,3 +96,17 @@ attempts with synthetic inputs. Add Noul/Choice/Score/combined examples, a
 pre-execution agent demo, and a labeled quality-evaluation harness. Thresholds
 are illustrative until measured. Keep the branch and commits local as requested.
 Do not push, open a PR, merge, tag, bump the package version or publish.
+
+## Local validation record
+
+Implementation checks completed on this local branch:
+
+- Python 3.10, 3.11, 3.12 and 3.13: 258 passed, one explicitly opt-in live test skipped on each version.
+- Ruff, bytecode compilation and whitespace checks passed.
+- Noul, mixed typed assessment, pre-execution stub and labelled harness examples ran with marked fixtures.
+- Source distribution and wheel built; required artifact contents and Twine metadata checks passed.
+- Isolated wheel installation passed legacy and disabled-Jev smoke checks.
+- No live Jev request, detection-quality claim, push, pull request, tag or package publication.
+
+The tests establish integration behavior using mocked provider responses. They do
+not establish production detection quality or current account/model access.

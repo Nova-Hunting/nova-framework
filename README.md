@@ -178,3 +178,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, validation gates, 
 ## Credits
 
 Created and maintained by [fr0gger](https://github.com/fr0gger).
+
+## Optional Jev section
+
+Jev adds typed Noul, Choice and Score questions through OpenRouter. NOVA converts
+the answers into predicates for `condition:`. It requires explicit activation;
+uncertain or unavailable required answers raise an evaluation error. See the
+[Jev rule, SDK and CLI guide](docs/jev.md) and [runnable examples](examples/jev/demo.py).

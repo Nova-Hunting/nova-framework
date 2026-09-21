@@ -35,3 +35,6 @@ include tests/test_static_security.py
 recursive-include nova *.py
 recursive-include scripts *.py
 recursive-include tests *.py
+
+recursive-include docs *.md
+recursive-include examples/jev *.py *.nov

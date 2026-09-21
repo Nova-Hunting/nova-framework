@@ -1,5 +1,16 @@
 # NOVA Framework Changelog
 
+## [Unreleased]
+
+### Added
+- Optional `jev:` declarations for Noul, Choice and Score through OpenRouter Decisions.
+- Three-state predicates, mixed batches, explicit context, rich diagnostics and strict incomplete-evaluation errors across core, SDK, decorators and CLI.
+- `--jev`, `--skip-jev`, `--jev-model` and `--jev-state` CLI options; separate Jev configuration and explicit activation.
+- Offline regression tests, opt-in synthetic live smoke test, typed examples and a labelled evaluation harness.
+
+### Changed
+- Rule boundaries now use a shared lexical reader for nested blocks, quoted strings, regex literals and comments. Legacy rule behavior and LLM temperature semantics remain unchanged.
+
 ## [0.3.1] - 2026-09-21
 
 ### Security

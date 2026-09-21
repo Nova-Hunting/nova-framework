@@ -340,3 +340,15 @@ pytest tests/test_sdk.py -v
 # Run specific test
 pytest tests/test_sdk.py::TestNovaPolicy -v
 ```
+
+## Optional Jev evaluation
+
+Pass `jev_config={"enabled": True}` to `Nova` to enable OpenRouter Decisions, and
+pass explicit context with `scan(text, jev_state=context)`. `scan_async` supports
+the same options. `skip_llm=True` does not disable Jev.
+
+Inspect `result.jev_results` for all typed answers and `result.jev_batches` for
+request metadata. Catch `NovaEvaluationError` for unresolved required checks;
+its `partial_result` preserves definite findings but cannot report allowed or
+clean. Protection decorators accept `jev_state_factory` and never execute after
+an unresolved required check. See the [full guide](../../docs/jev.md).

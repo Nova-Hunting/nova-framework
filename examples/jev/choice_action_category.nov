@@ -1,0 +1,21 @@
+// Illustrative thresholds; validate against representative labelled cases.
+rule ActionCategory
+{
+    meta:
+        description = "Optional typed Jev assessment"
+        severity = "high"
+    jev:
+    $operation = choice "Which primary operation does text propose?" {
+        options = {
+            read = "Read ordinary information"
+            local_change = "Modify ordinary local content"
+            external_transfer = "Send local information to an external recipient"
+            destructive_change = "Delete data or overwrite existing history"
+        }
+        match = ["external_transfer", "destructive_change"]
+        min_confidence = 0.60
+    }
+
+    condition:
+        jev.$operation
+}

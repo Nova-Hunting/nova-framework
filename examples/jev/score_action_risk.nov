@@ -1,0 +1,21 @@
+// Illustrative thresholds; validate against representative labelled cases.
+rule ActionImpact
+{
+    meta:
+        description = "Optional typed Jev assessment"
+        severity = "high"
+    jev:
+    $risk = score "What is the potential impact of the proposed action in text?" {
+        levels = [
+            "No persistent changes or sensitive exposure",
+            "Limited changes with straightforward recovery",
+            "Sensitive information exposure or difficult recovery",
+            "Large-scale exposure or irreversible loss"
+        ]
+        threshold = 2.0
+        min_confidence = 0.60
+    }
+
+    condition:
+        jev.$risk
+}

@@ -75,3 +75,21 @@ When `--config` is passed explicitly, a missing or malformed file fails fast ins
 ## Maintainability Notes
 
 The 2026 cleanup split the two largest modules while preserving import paths: `nova/evaluators/llm.py` became the `nova/evaluators/llm/` package, and `NovaRuleFileParser` moved to `nova/core/rule_file.py` (re-exported from `nova.core.parser`). Remaining larger modules, in case future splits are wanted: `nova/core/parser.py` (~900 lines, single `NovaParser` class — split candidate: move condition-section validation into a helper module) and `nova/sdk/nova.py` (~870 lines — split candidate: extract rule-loading and fast-path scan scheduling). Neither exceeds the 1,000-line threshold today.
+
+## Jev evaluation path
+
+Rules with `jev:` use typed declarations in `nova/core/jev.py`, a lexical
+structural reader shared by the single-rule and file parsers, and the restricted
+three-state condition compiler in `nova/evaluators/jev/condition.py`. Legacy-only
+rules retain their condition evaluator and serialized results.
+
+`projection.py` separates provider question construction, answer validation and
+predicate conversion. `openrouter.py` implements the batch transport using
+requests; `config.py` and `state.py` control activation and the explicit input
+boundary. The scan-local engine runs keywords, semantics, a mixed Jev batch, then
+LLM checks, pruning resolved condition branches. SDK fast and model phases share
+evidence without persistent caches. Core matcher, scanner and SDK all use this
+engine. Protection wrappers propagate incomplete evaluations before invocation.
+
+See the [contract](docs/design/jev-section.md) and [usage guide](docs/jev.md) for
+state envelopes, uncertainty, transport limits and configuration precedence.

@@ -33,6 +33,13 @@ SDIST_REQUIRED_FILES = {
     "scripts/check_secrets.py",
     "scripts/smoke_wheel.py",
     "scripts/verify_artifacts.py",
+    "docs/jev.md",
+    "docs/design/jev-section.md",
+    "examples/jev/demo.py",
+    "examples/jev/evaluate_quality.py",
+    "examples/jev/agent_action_risk.nov",
+    "tests/test_jev_parser.py",
+    "tests/test_jev_integration.py",
     "tests/test_cli.py",
     "tests/test_condition.py",
     "tests/test_issue_22.py",
@@ -45,12 +52,18 @@ SDIST_REQUIRED_FILES = {
     "tests/test_static_security.py",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
+    "nova/core/jev.py",
+    "nova/evaluators/jev/openrouter.py",
+    "nova/sdk/jev_protection.py",
 }
 
 WHEEL_REQUIRED_FILES = {
     "nova/sdk/README.md",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
+    "nova/core/jev.py",
+    "nova/evaluators/jev/openrouter.py",
+    "nova/sdk/jev_protection.py",
 }
 
 REQUIRED_PROJECT_URL_LABELS = {

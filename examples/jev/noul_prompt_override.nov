@@ -1,0 +1,16 @@
+// Illustrative thresholds; validate against representative labelled cases.
+rule PromptOverride
+{
+    meta:
+        description = "Optional typed Jev assessment"
+        severity = "high"
+    jev:
+    $scope = noul "Does text contain an instruction override attempt, rather than merely quoting or reporting one?" {
+        true = "Attempts to bypass higher-priority instructions or obtain restricted information"
+        false = "Ordinary requests and reports that quote attacks without instructing their execution"
+        threshold = 0.75
+    }
+
+    condition:
+        jev.$scope
+}
