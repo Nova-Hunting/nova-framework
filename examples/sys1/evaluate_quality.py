@@ -4,7 +4,7 @@ import argparse
 import json
 import time
 
-from nova.core.jev import NovaEvaluationError
+from nova.core.sys1 import NovaEvaluationError
 from demo import detector
 
 
@@ -39,7 +39,7 @@ def main():
             result, matched = None, None
         else:
             try:
-                result = nova.scan(action, jev_state={"approved_task": goal, "current_action": action, "previous_steps": []})
+                result = nova.scan(action, sys1_state={"approved_task": goal, "current_action": action, "previous_steps": []})
                 matched = bool(result.matches)
             except NovaEvaluationError as error:
                 result, matched = error.result, None
@@ -50,7 +50,7 @@ def main():
             metrics["false_positives"] += int(matched and not expected)
             metrics["misses"] += int(not matched and expected)
         if result is not None:
-            for batches in result.jev_batches.values():
+            for batches in result.sys1_batches.values():
                 for batch in batches:
                     metrics["http_requests"] += batch.get("request_count", 0)
                     cost = batch.get("usage", {}).get("cost")

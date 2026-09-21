@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_fixture_demos_are_executable(mode):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
-    result = subprocess.run([sys.executable, str(ROOT / "examples/jev/demo.py"), mode],
+    result = subprocess.run([sys.executable, str(ROOT / "examples/sys1/demo.py"), mode],
                             capture_output=True, text=True, env=env, check=True)
     assert "FIXTURE OUTPUT" in result.stdout
     if mode == "typed":
@@ -25,7 +25,7 @@ def test_fixture_demos_are_executable(mode):
 def test_fixture_quality_harness_marks_its_limits():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
-    result = subprocess.run([sys.executable, str(ROOT / "examples/jev/evaluate_quality.py"), "--limit", "9"],
+    result = subprocess.run([sys.executable, str(ROOT / "examples/sys1/evaluate_quality.py"), "--limit", "9"],
                             capture_output=True, text=True, env=env, check=True)
     assert '"http_requests": 0' in result.stdout
     assert '"indeterminate": 1' in result.stdout

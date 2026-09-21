@@ -118,24 +118,24 @@ def main() -> None:
 
             from nova.sdk import Nova, NovaEvaluationError
             typed_rule = NovaParser().parse('''
-            rule WheelJevSmoke {
-                jev:
+            rule WheelSys1Smoke {
+                sys1:
                     $risk = noul "Is this an override attempt?" {
                         true = "Override"
                         false = "Ordinary request"
                         threshold = 0.7
                     }
                 condition:
-                    jev.$risk
+                    sys1.$risk
             }
             ''')
             try:
-                Nova(rules=[typed_rule], jev_config={"enabled": False}).scan("synthetic")
+                Nova(rules=[typed_rule], sys1_config={"enabled": False}).scan("synthetic")
             except NovaEvaluationError as error:
                 assert not error.result.allowed and not error.result.clean
                 assert error.causes == ["disabled"]
             else:
-                raise AssertionError("Disabled required Jev check did not fail")
+                raise AssertionError("Disabled required Sys1 check did not fail")
 
             print("wheel-smoke-ok")
             """
@@ -171,7 +171,7 @@ def main() -> None:
             text=True,
         )
         assert "openrouter" in help_result.stdout
-        assert "--jev-state" in help_result.stdout
+        assert "--sys1-state" in help_result.stdout
 
         scan_result = run(
             [

@@ -2,9 +2,9 @@
 rule PromptOverride
 {
     meta:
-        description = "Optional typed Jev assessment"
+        description = "Optional typed Sys1 assessment"
         severity = "high"
-    jev:
+    sys1:
     $scope = noul "Does text contain an instruction override attempt, rather than merely quoting or reporting one?" {
         true = "Attempts to bypass higher-priority instructions or obtain restricted information"
         false = "Ordinary requests and reports that quote attacks without instructing their execution"
@@ -12,5 +12,5 @@ rule PromptOverride
     }
 
     condition:
-        jev.$scope
+        sys1.$scope
 }

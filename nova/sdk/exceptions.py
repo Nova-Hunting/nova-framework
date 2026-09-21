@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from .result import ScanResult
 
 
-from nova.core.jev import NovaEvaluationError as NovaEvaluationError
+from nova.core.sys1 import NovaEvaluationError as NovaEvaluationError
 
 class NovaSDKError(Exception):
     """Base exception for Nova SDK."""

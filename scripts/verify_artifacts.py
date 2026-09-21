@@ -33,13 +33,14 @@ SDIST_REQUIRED_FILES = {
     "scripts/check_secrets.py",
     "scripts/smoke_wheel.py",
     "scripts/verify_artifacts.py",
-    "docs/jev.md",
-    "docs/design/jev-section.md",
-    "examples/jev/demo.py",
-    "examples/jev/evaluate_quality.py",
-    "examples/jev/agent_action_risk.nov",
-    "tests/test_jev_parser.py",
-    "tests/test_jev_integration.py",
+    "docs/sys1.md",
+    "docs/design/sys1-section.md",
+    "docs/design/laya-integration.md",
+    "examples/sys1/demo.py",
+    "examples/sys1/evaluate_quality.py",
+    "examples/sys1/agent_action_risk.nov",
+    "tests/test_sys1_parser.py",
+    "tests/test_sys1_integration.py",
     "tests/test_cli.py",
     "tests/test_condition.py",
     "tests/test_issue_22.py",
@@ -52,18 +53,18 @@ SDIST_REQUIRED_FILES = {
     "tests/test_static_security.py",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
-    "nova/core/jev.py",
-    "nova/evaluators/jev/openrouter.py",
-    "nova/sdk/jev_protection.py",
+    "nova/core/sys1.py",
+    "nova/evaluators/sys1/openrouter.py",
+    "nova/sdk/sys1_protection.py",
 }
 
 WHEEL_REQUIRED_FILES = {
     "nova/sdk/README.md",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
-    "nova/core/jev.py",
-    "nova/evaluators/jev/openrouter.py",
-    "nova/sdk/jev_protection.py",
+    "nova/core/sys1.py",
+    "nova/evaluators/sys1/openrouter.py",
+    "nova/sdk/sys1_protection.py",
 }
 
 REQUIRED_PROJECT_URL_LABELS = {
@@ -124,6 +125,14 @@ def main() -> None:
 
     require_subset(SDIST_REQUIRED_FILES, normalized_sdist_names(sdist, version), sdist)
     require_subset(WHEEL_REQUIRED_FILES, wheel_names(wheel), wheel)
+
+    for artifact, names in (
+        (sdist, normalized_sdist_names(sdist, version)),
+        (wheel, wheel_names(wheel)),
+    ):
+        stale = sorted(name for name in names if name.startswith("nova/") and "jev" in name)
+        if stale:
+            raise SystemExit(f"{artifact} contains obsolete Jev module paths: {stale}")
 
     metadata = wheel_metadata(wheel, version)
     for label in REQUIRED_PROJECT_URL_LABELS:

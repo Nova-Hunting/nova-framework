@@ -77,7 +77,7 @@ class Nova:
         on_flag: Optional[Callable[["ScanResult"], Any]] = None,
         ignore_invalid_rules: bool = False,
         debug: bool = False,
-        *, jev_config=None, jev_evaluator=None,
+        *, sys1_config=None, sys1_evaluator=None,
     ):
         """
         Initialize Nova SDK.
@@ -98,8 +98,8 @@ class Nova:
         """
         init_start = time.perf_counter()
 
-        self._jev_options = jev_config
-        self._jev_evaluator = jev_evaluator
+        self._sys1_options = sys1_config
+        self._sys1_evaluator = sys1_evaluator
         self._rules: List[NovaRule] = []
         self._rule_sources: Dict[str, str] = {}  # rule_name → source file path
         self._debug = debug
@@ -306,20 +306,20 @@ class Nova:
 
     def _initialize_matchers(self) -> None:
         """Create matchers for all rules, sharing evaluators."""
-        if any(rule.jev for rule in self._rules) and self._jev_evaluator is None:
-            from nova.evaluators.jev.openrouter import OpenRouterJevEvaluator
-            self._jev_evaluator = OpenRouterJevEvaluator(self._jev_options)
+        if any(rule.sys1 for rule in self._rules) and self._sys1_evaluator is None:
+            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            self._sys1_evaluator = OpenRouterSys1Evaluator(self._sys1_options)
         for rule in self._rules:
             self._matchers[rule.name] = NovaMatcher(
                 rule=rule,
                 semantic_evaluator=self._semantic_evaluator,  # Share semantic evaluator
                 llm_evaluator=self._llm_evaluator,
                 create_llm_evaluator=False,  # Don't create new evaluators
-                jev_config=self._jev_options, jev_evaluator=self._jev_evaluator
+                sys1_config=self._sys1_options, sys1_evaluator=self._sys1_evaluator
             )
 
     def scan(self, text: str, debug: Optional[bool] = None, parallel: bool = True,
-             skip_llm: bool = False, *, jev_state=None, skip_jev=False) -> ScanResult:
+             skip_llm: bool = False, *, sys1_state=None, skip_sys1=False) -> ScanResult:
         """
         Scan text against all loaded rules.
 
@@ -349,14 +349,14 @@ class Nova:
         rule_warnings: Dict[str, List[str]] = {}
 
         causes = []
-        if any(rule.jev for rule in self._rules):
-            from nova.evaluators.jev.engine import collect
-            from nova.core.jev import NovaEvaluationError
-            rules_with_llm = {rule.name for rule in self._rules if rule.llms or rule.jev}
+        if any(rule.sys1 for rule in self._rules):
+            from nova.evaluators.sys1.engine import collect
+            from nova.core.sys1 import NovaEvaluationError
+            rules_with_llm = {rule.name for rule in self._rules if rule.llms or rule.sys1}
             early_block, skipped_llm_count = False, 0
             try:
-                results, causes = collect(self._rules, self._matchers, text, scan_text, context=jev_state,
-                                          skip_llm=skip_llm, skip_jev=skip_jev, parallel=parallel)
+                results, causes = collect(self._rules, self._matchers, text, scan_text, context=sys1_state,
+                                          skip_llm=skip_llm, skip_sys1=skip_sys1, parallel=parallel)
             except NovaEvaluationError as error:
                 partial = ScanResult(text, text, evaluation_complete=False)
                 raise NovaEvaluationError(partial, error.causes) from None
@@ -506,7 +506,7 @@ class Nova:
                 *[name for name, matched in matching_keywords.items() if matched],
                 *[name for name, matched in matching_semantics.items() if matched],
                 *[name for name, matched in matching_llm.items() if matched],
-                *result.get("matching_jev", {}),
+                *result.get("matching_sys1", {}),
             ]
 
             # Create RuleMatch
@@ -522,7 +522,7 @@ class Nova:
                 semantic_scores=result.get("semantic_scores", {}),
                 llm_scores=result.get("llm_scores", {}),
                 matched_patterns=matched_patterns,
-                matching_jev=result.get("matching_jev", {}),
+                matching_sys1=result.get("matching_sys1", {}),
             )
             matches.append(match)
 
@@ -550,8 +550,8 @@ class Nova:
             redactions=all_redactions,
             warnings=scan_warnings,
             rule_warnings=rule_warnings,
-            jev_results={rule.name: result["jev_results"] for rule, result in results if rule.jev},
-            jev_batches={rule.name: result.get("jev_batches", []) for rule, result in results if rule.jev},
+            sys1_results={rule.name: result["sys1_results"] for rule, result in results if rule.sys1},
+            sys1_batches={rule.name: result.get("sys1_batches", []) for rule, result in results if rule.sys1},
             evaluation_complete=not causes,
         )
 
@@ -577,11 +577,11 @@ class Nova:
             self._print_debug(text, scan_result, scan_elapsed_ms, fast_count, llm_count, skipped_llm_count, skip_reason)
 
         if causes:
-            from nova.core.jev import NovaEvaluationError
+            from nova.core.sys1 import NovaEvaluationError
             raise NovaEvaluationError(scan_result, causes)
         return scan_result
 
-    async def scan_async(self, text: str, *, jev_state=None, skip_jev=False, skip_llm=False) -> ScanResult:
+    async def scan_async(self, text: str, *, sys1_state=None, skip_sys1=False, skip_llm=False) -> ScanResult:
         """
         Async version of scan.
 
@@ -594,7 +594,7 @@ class Nova:
             ScanResult with all match details and actions
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(self.scan, text, jev_state=jev_state, skip_jev=skip_jev, skip_llm=skip_llm))
+        return await loop.run_in_executor(None, functools.partial(self.scan, text, sys1_state=sys1_state, skip_sys1=skip_sys1, skip_llm=skip_llm))
 
     def protect(
         self,
@@ -604,7 +604,7 @@ class Nova:
         on_block: Optional[Callable] = None,
         raise_on_block: bool = True,
         skip_llm: bool = False,
-        *, jev_state_factory=None, skip_jev=False,
+        *, sys1_state_factory=None, skip_sys1=False,
     ):
         """
         Decorator to protect a function with Nova scanning.
@@ -634,10 +634,10 @@ class Nova:
             action = Action(action)
 
         def decorator(func: Callable) -> Callable:
-            if any(rule.jev for rule in self._rules) or jev_state_factory is not None:
-                from nova.sdk.jev_protection import protect_jev
-                return protect_jev(self, func, action, severity, param_name, on_block, raise_on_block,
-                                   skip_llm, skip_jev, jev_state_factory)
+            if any(rule.sys1 for rule in self._rules) or sys1_state_factory is not None:
+                from nova.sdk.sys1_protection import protect_sys1
+                return protect_sys1(self, func, action, severity, param_name, on_block, raise_on_block,
+                                   skip_llm, skip_sys1, sys1_state_factory)
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
                 # Extract text to scan
@@ -846,16 +846,16 @@ class Nova:
         if self._rule_needs_llm(rule) and self._llm_evaluator is None:
             self._llm_evaluator = self._create_configured_llm_evaluator()
 
-        if rule.jev and self._jev_evaluator is None:
-            from nova.evaluators.jev.openrouter import OpenRouterJevEvaluator
-            self._jev_evaluator = OpenRouterJevEvaluator(self._jev_options)
+        if rule.sys1 and self._sys1_evaluator is None:
+            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            self._sys1_evaluator = OpenRouterSys1Evaluator(self._sys1_options)
         self._rules.append(rule)
         self._matchers[rule.name] = NovaMatcher(
             rule=rule,
             semantic_evaluator=self._semantic_evaluator,  # Share the semantic evaluator
             llm_evaluator=self._llm_evaluator,
             create_llm_evaluator=False,
-            jev_config=self._jev_options, jev_evaluator=self._jev_evaluator
+            sys1_config=self._sys1_options, sys1_evaluator=self._sys1_evaluator
         )
 
     def add_policy_rule(self, pattern: str, config: Dict) -> None:

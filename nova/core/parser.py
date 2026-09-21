@@ -63,25 +63,27 @@ class NovaParser:
             NovaParserError: If the rule definition doesn't follow the grammar
         """
         from nova.core.structure import sections
-        from nova.core.jev_parser import parse_jev
-        from nova.evaluators.jev.condition import compile_condition
+        from nova.core.sys1_parser import parse_sys1
+        from nova.evaluators.sys1.condition import compile_condition
 
         try:
             rule_name, bodies = sections(content)
             self.rule = NovaRule(name=rule_name)
-            self.variable_names = {name: set() for name in ("keywords", "semantics", "llm", "jev")}
+            self.variable_names = {name: set() for name in ("keywords", "semantics", "llm", "sys1")}
             for name, (body, offset) in bodies.items():
+                if name == "jev":
+                    raise ValueError("The 'jev:' section was renamed to 'sys1:'. Update its condition references too.")
                 if name == "condition":
                     continue
-                if name == "jev":
-                    self.rule.jev = parse_jev(body, rule_name, offset)
-                    self.variable_names["jev"] = set(self.rule.jev)
+                if name == "sys1":
+                    self.rule.sys1 = parse_sys1(body, rule_name, offset)
+                    self.variable_names["sys1"] = set(self.rule.sys1)
                 else:
                     self._parse_section(name, body.splitlines())
             if "condition" not in bodies:
                 raise ValueError(f"Rule '{rule_name}' must have a condition section")
             condition = bodies["condition"][0]
-            if self.rule.jev:
+            if self.rule.sys1:
                 from nova.core.structure import tokenize
                 self.rule.condition = " ".join(t.text for t in tokenize(condition) if t.kind != "newline")
                 # Restore references split by the structural lexer.
@@ -138,7 +140,7 @@ class NovaParser:
         elif section == "condition":
             self.rule.condition = self._parse_condition_section(content)
         else:
-            expected = "meta, keywords, semantics, llm, condition"
+            expected = "meta, keywords, semantics, llm, sys1, condition"
             raise NovaParserError(
                 f"Unknown section '{section}' in rule '{self.rule.name}'. Expected one of: {expected}"
             )

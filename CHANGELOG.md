@@ -3,12 +3,14 @@
 ## [Unreleased]
 
 ### Added
-- Optional `jev:` declarations for Noul, Choice and Score through OpenRouter Decisions.
+- Optional `sys1:` declarations for Noul, Choice and Score through OpenRouter Decisions.
 - Three-state predicates, mixed batches, explicit context, rich diagnostics and strict incomplete-evaluation errors across core, SDK, decorators and CLI.
-- `--jev`, `--skip-jev`, `--jev-model` and `--jev-state` CLI options; separate Jev configuration and explicit activation.
+- `--sys1`, `--skip-sys1`, `--sys1-model` and `--sys1-state` CLI options; separate Sys1 configuration and explicit activation.
 - Offline regression tests, opt-in synthetic live smoke test, typed examples and a labelled evaluation harness.
 
 ### Changed
+- Renamed the unreleased `jev:` section to provider-independent `sys1:`, including CLI flags, SDK arguments, configuration, diagnostics and module paths. See `docs/sys1.md` for migration; the OpenRouter model identifier remains `typesafe/jev-1.13`.
+- Added a source-based Laya review and proposed local-provider integration in `docs/design/laya-integration.md`; Laya inference is not yet implemented.
 - Rule boundaries now use a shared lexical reader for nested blocks, quoted strings, regex literals and comments. Legacy rule behavior and LLM temperature semantics remain unchanged.
 
 ## [0.3.1] - 2026-09-21

@@ -1,9 +1,9 @@
 """Pure request compilation, response validation and predicate projection."""
 
 from dataclasses import asdict
-from nova.core.jev import (
+from nova.core.sys1 import (
     NoulPattern, ChoicePattern, NoulAnswer, ChoiceAnswer, ScoreAnswer,
-    JevEvaluation, Predicate, number, primitive,
+    Sys1Evaluation, Predicate, number, primitive,
 )
 
 
@@ -20,7 +20,7 @@ def question(pattern):
 def record(pattern, **kwargs):
     fields = asdict(pattern)
     settings = {key: fields[key] for key in ("threshold", "match", "min_confidence") if key in fields}
-    return JevEvaluation(primitive(pattern), settings=settings, **kwargs)
+    return Sys1Evaluation(primitive(pattern), settings=settings, **kwargs)
 
 
 def validate_answer(pattern, raw):

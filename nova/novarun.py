@@ -520,32 +520,32 @@ def print_prompts_summary(results: List[Dict[str, Any]], prompts: List[str]):
         print(f"{Fore.WHITE}{i+1:<4} {result_text:<27} {Fore.YELLOW}{display_prompt}")
 
 
-def run_jev_cli(args, parser, blocks, prompts):
-    """Use the shared scanner for Jev rules, preserving legacy CLI output elsewhere."""
+def run_sys1_cli(args, parser, blocks, prompts):
+    """Use the shared scanner for Sys1 rules, preserving legacy CLI output elsewhere."""
     import json
     import time
     from nova.core.scanner import NovaScanner
-    from nova.core.jev import NovaEvaluationError
-    from nova.evaluators.jev.config import JevConfig
-    from nova.evaluators.jev.state import snapshot_state
+    from nova.core.sys1 import NovaEvaluationError
+    from nova.evaluators.sys1.config import Sys1Config
+    from nova.evaluators.sys1.state import snapshot_state
 
     options = {}
-    if args.jev_enabled is not None:
-        options["enabled"] = args.jev_enabled
-    if args.jev_model is not None:
-        options["model"] = args.jev_model
+    if args.sys1_enabled is not None:
+        options["enabled"] = args.sys1_enabled
+    if args.sys1_model is not None:
+        options["model"] = args.sys1_model
     try:
-        config = JevConfig.resolve(options)
+        config = Sys1Config.resolve(options)
         rules = [NovaParser().parse(block) for block in (blocks[:1] if args.single else blocks)]
         context = None
-        if args.jev_state:
-            with open(args.jev_state, encoding="utf-8") as stream:
+        if args.sys1_state:
+            with open(args.sys1_state, encoding="utf-8") as stream:
                 payload = stream.read(config.max_request_bytes + 1)
             if len(payload.encode("utf-8")) > config.max_request_bytes:
-                raise ValueError("Jev context exceeds request size limit")
+                raise ValueError("Sys1 context exceeds request size limit")
             context = json.loads(payload)
             snapshot_state("", context, config.max_request_bytes)
-        scanner = NovaScanner(rules, llm_type=args.llm, llm_model=args.model, jev_config=config)
+        scanner = NovaScanner(rules, llm_type=args.llm, llm_model=args.model, sys1_config=config)
     except (ValueError, OSError, NovaParserError) as error:
         parser.error(str(error))
     incomplete = False
@@ -553,20 +553,20 @@ def run_jev_cli(args, parser, blocks, prompts):
         started = time.perf_counter()
         causes = []
         try:
-            details = scanner.scan_with_details(prompt, jev_state=context)
+            details = scanner.scan_with_details(prompt, sys1_state=context)
         except NovaEvaluationError as error:
             details = error.partial_result
             incomplete = True
             causes = error.causes
         # No prompt/context or credentials in default output. Evidence remains inspectable.
         output = {"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
-                  "matches": details.get("matches", []), "jev_results": details.get("jev_results", {})}
+                  "matches": details.get("matches", []), "sys1_results": details.get("sys1_results", {})}
         elapsed_ms = (time.perf_counter() - started) * 1000
         if causes:
             output["errors"] = sorted(set(causes))
         if args.verbose:
             output["elapsed_ms"] = round(elapsed_ms, 3)
-            output["jev_config"] = {"enabled": config.enabled, "provider": config.provider, "model": config.model}
+            output["sys1_config"] = {"enabled": config.enabled, "provider": config.provider, "model": config.model}
             output["rule_details"] = {}
             for name, result in details.get("detailed_results", {}).items():
                 debug = result.get("debug", {})
@@ -577,15 +577,15 @@ def run_jev_cli(args, parser, blocks, prompts):
                     "matching_keywords": result.get("matching_keywords", {}),
                     "matching_semantics": result.get("matching_semantics", {}),
                     "matching_llm": result.get("matching_llm", {}),
-                    "matching_jev": result.get("matching_jev", {}),
+                    "matching_sys1": result.get("matching_sys1", {}),
                     "evaluation_warnings": debug.get("evaluation_warnings", []),
-                    "jev_batches": result.get("jev_batches", []),
+                    "sys1_batches": result.get("sys1_batches", []),
                 }
         if args.json:
             print(json.dumps(output, ensure_ascii=False))
         else:
-            from nova.utils.jev_output import format_jev_output
-            print(format_jev_output(details, index, elapsed_ms, config, args.verbose, causes))
+            from nova.utils.sys1_output import format_sys1_output
+            print(format_sys1_output(details, index, elapsed_ms, config, args.verbose, causes))
     if incomplete:
         sys.exit(1)
 
@@ -613,14 +613,14 @@ def main():
     # Keep the -a/--all flag for backward compatibility, but make it a no-op (all rules is now default)
     parser.add_argument('-a', '--all', action='store_true', help='Check against all rules in the file (default behavior)')
     
-    jev_group = parser.add_mutually_exclusive_group()
-    jev_group.add_argument('--jev', dest='jev_enabled', action='store_true', default=None,
-                           help='Enable remote Jev decisions through OpenRouter')
-    jev_group.add_argument('--skip-jev', dest='jev_enabled', action='store_false',
-                           help='Disable Jev; unresolved required checks are errors')
-    parser.add_argument('--jev-model', help='OpenRouter Decisions model (independent of --model)')
-    parser.add_argument('--jev-state', metavar='FILE', help='JSON context for Jev; paired with each prompt')
-    parser.add_argument('--json', action='store_true', help='Emit Jev results as JSON Lines instead of a readable summary')
+    sys1_group = parser.add_mutually_exclusive_group()
+    sys1_group.add_argument('--sys1', dest='sys1_enabled', action='store_true', default=None,
+                           help='Enable remote Sys1 decisions through OpenRouter')
+    sys1_group.add_argument('--skip-sys1', dest='sys1_enabled', action='store_false',
+                           help='Disable Sys1; unresolved required checks are errors')
+    parser.add_argument('--sys1-model', help='OpenRouter Decisions model (independent of --model)')
+    parser.add_argument('--sys1-state', metavar='FILE', help='JSON context for Sys1; paired with each prompt')
+    parser.add_argument('--json', action='store_true', help='Emit Sys1 results as JSON Lines instead of a readable summary')
     args = parser.parse_args()
     
     try:
@@ -653,10 +653,10 @@ def main():
         print(f"{Fore.RED}Error parsing rule file: {e}")
         sys.exit(1)
     from nova.core.structure import sections
-    if any("jev" in sections(block)[1] for block in rule_blocks):
-        return run_jev_cli(args, parser, rule_blocks, prompts)
+    if any("sys1" in sections(block)[1] for block in rule_blocks):
+        return run_sys1_cli(args, parser, rule_blocks, prompts)
     if args.json:
-        parser.error("--json currently requires a rule file with a jev section")
+        parser.error("--json currently requires a rule file with a sys1 section")
     if not args.single and len(rule_blocks) > 1:
         # Extract all rules from the file
         if not rule_blocks:

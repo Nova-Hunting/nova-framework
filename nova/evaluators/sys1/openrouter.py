@@ -6,8 +6,8 @@ import threading
 import time
 import requests
 
-from nova.core.jev import JevBatch
-from .config import JevConfig
+from nova.core.sys1 import Sys1Batch
+from .config import Sys1Config
 from .projection import question, record, validate_answer, project
 
 
@@ -19,11 +19,11 @@ class TransportError(Exception):
     """A safe diagnostic code, never a response body or request state."""
 
 
-class OpenRouterJevEvaluator:
+class OpenRouterSys1Evaluator:
     endpoint = "https://openrouter.ai/api/alpha/decisions"
 
     def __init__(self, config=None, *, api_key=None, session_factory=requests.Session):
-        self.config = JevConfig.resolve(config)
+        self.config = Sys1Config.resolve(config)
         self._api_key = api_key
         self._session_factory = session_factory
         self._local = threading.local()
@@ -79,7 +79,7 @@ class OpenRouterJevEvaluator:
 
     def evaluate_many(self, patterns, state):
         if not patterns:
-            return JevBatch({})
+            return Sys1Batch({})
         mapping = {f"q{i}": name for i, name in enumerate(patterns)}
         evaluations = {name: record(pattern, requested_model=self.config.model, question_id=qid)
                        for qid, name in mapping.items() for pattern in [patterns[name]]}
@@ -124,4 +124,4 @@ class OpenRouterJevEvaluator:
         except (ValueError, TypeError):
             for entry in evaluations.values():
                 entry.status, entry.reason = "error", "invalid_request"
-        return JevBatch(evaluations, metadata)
+        return Sys1Batch(evaluations, metadata)

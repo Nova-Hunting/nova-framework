@@ -24,7 +24,7 @@ class RuleMatch:
     semantic_scores: Dict[str, float] = field(default_factory=dict)
     llm_scores: Dict[str, float] = field(default_factory=dict)
     matched_patterns: List[str] = field(default_factory=list)
-    matching_jev: Dict[str, bool] = field(default_factory=dict)
+    matching_sys1: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -54,8 +54,8 @@ class ScanResult:
     redactions: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     rule_warnings: Dict[str, List[str]] = field(default_factory=dict)
-    jev_results: Dict[str, Any] = field(default_factory=dict)
-    jev_batches: Dict[str, Any] = field(default_factory=dict)
+    sys1_results: Dict[str, Any] = field(default_factory=dict)
+    sys1_batches: Dict[str, Any] = field(default_factory=dict)
     evaluation_complete: bool = True
 
     @property
@@ -171,12 +171,12 @@ class ScanResult:
             ],
             "redactions": self.redactions
         }
-        if self.jev_results or not self.evaluation_complete:
-            result.update(jev_results=self.jev_results, jev_batches=self.jev_batches,
+        if self.sys1_results or not self.evaluation_complete:
+            result.update(sys1_results=self.sys1_results, sys1_batches=self.sys1_batches,
                           evaluation_complete=self.evaluation_complete)
             for item, match in zip(result["matches"], self.matches):
-                if match.rule_name in self.jev_results:
-                    item["matching_jev"] = match.matching_jev
+                if match.rule_name in self.sys1_results:
+                    item["matching_sys1"] = match.matching_sys1
         return result
 
     def __bool__(self) -> bool:

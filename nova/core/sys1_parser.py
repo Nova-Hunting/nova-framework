@@ -1,17 +1,17 @@
-"""Strict reader for Jev's deliberately small declaration grammar."""
+"""Strict reader for Sys1's deliberately small declaration grammar."""
 
 import json
 import re
 
 from nova.core.structure import tokenize
-from nova.core.jev import NoulPattern, ChoicePattern, ScorePattern
+from nova.core.sys1 import NoulPattern, ChoicePattern, ScorePattern
 
 
 class Reader:
     def __init__(self, source, rule, offset):
         self.tokens = tokenize(source)
         self.index = 0
-        self.rule, self.offset, self.variable = rule, offset, "jev"
+        self.rule, self.offset, self.variable = rule, offset, "sys1"
 
     def fail(self, message):
         token = self.tokens[min(self.index, len(self.tokens) - 1)] if self.tokens else None
@@ -94,7 +94,7 @@ class Reader:
             self.take("=")
             kind = self.take()
             if kind not in contracts:
-                self.fail(f"Unknown Jev primitive '{kind}'")
+                self.fail(f"Unknown Sys1 primitive '{kind}'")
             question = self.string()
             self.take("{")
             self.newlines()
@@ -126,9 +126,9 @@ class Reader:
                 self.fail("Expected newline after declaration")
             self.newlines()
         if not patterns:
-            self.fail("Empty Jev section")
+            self.fail("Empty Sys1 section")
         return patterns
 
 
-def parse_jev(source, rule, offset=0):
+def parse_sys1(source, rule, offset=0):
     return Reader(source, rule, offset).read()

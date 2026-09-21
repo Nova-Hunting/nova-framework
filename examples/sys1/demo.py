@@ -1,12 +1,12 @@
-"""Run with `python examples/jev/demo.py prompt|typed|agent [--live]` after installation."""
+"""Run with `python examples/sys1/demo.py prompt|typed|agent [--live]` after installation."""
 
 import argparse
 import json
 from pathlib import Path
 
 from nova import NovaParser
-from nova.core.jev import JevBatch, NoulPattern, ChoicePattern, NovaEvaluationError
-from nova.evaluators.jev.projection import validate_answer, project
+from nova.core.sys1 import Sys1Batch, NoulPattern, ChoicePattern, NovaEvaluationError
+from nova.evaluators.sys1.projection import validate_answer, project
 from nova.sdk import Nova, Action, NovaBlockedError
 
 HERE = Path(__file__).resolve().parent
@@ -28,7 +28,7 @@ class FixtureEvaluator:
                        "probabilities": {"0": .05, "1": .05, "2": .55, "3": .35},
                        "legend": {str(i): level for i, level in enumerate(pattern.levels)}}
             evaluations[name] = project(pattern, validate_answer(pattern, raw))
-        return JevBatch(evaluations, {"fixture": True, "request_count": 0})
+        return Sys1Batch(evaluations, {"fixture": True, "request_count": 0})
 
 
 def validated_context(arguments):
@@ -44,8 +44,8 @@ def validated_context(arguments):
 
 
 def detector(filename, live=False):
-    return Nova(rules_path=HERE / filename, jev_config={"enabled": True},
-                jev_evaluator=None if live else FixtureEvaluator(), default_action=Action.BLOCK)
+    return Nova(rules_path=HERE / filename, sys1_config={"enabled": True},
+                sys1_evaluator=None if live else FixtureEvaluator(), default_action=Action.BLOCK)
 
 
 def main():
@@ -60,16 +60,16 @@ def main():
         elif args.mode == "typed":
             rule = NovaParser().parse((HERE / "agent_action_risk.nov").read_text())
             # All three referenced declarations share one batch; no category-specific request.
-            rule.condition = "all of jev"
-            nova = Nova(rules=[rule], jev_config={"enabled": True},
-                        jev_evaluator=None if args.live else FixtureEvaluator())
+            rule.condition = "all of sys1"
+            nova = Nova(rules=[rule], sys1_config={"enabled": True},
+                        sys1_evaluator=None if args.live else FixtureEvaluator())
             action = "Send a private sample file to an external recipient."
-            result = nova.scan(action, jev_state=validated_context({"goal": "Read sample.txt locally",
+            result = nova.scan(action, sys1_state=validated_context({"goal": "Read sample.txt locally",
                                "proposed_action": action, "prompt": action, "history": ["Opened sample.txt"]}))
         else:
             nova = detector("agent_action_risk.nov", args.live)
 
-            @nova.protect(action="block", jev_state_factory=validated_context)
+            @nova.protect(action="block", sys1_state_factory=validated_context)
             def tool(prompt, goal, proposed_action, history):
                 # A stub only: no files are read and no data is sent by this function.
                 return "STUB EXECUTED after completed assessment"

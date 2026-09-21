@@ -49,7 +49,7 @@ def protect(
     nova_instance: Optional["Nova"] = None,
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
-    *, jev_config=None, jev_evaluator=None, jev_state_factory=None, skip_jev=False, skip_llm=False,
+    *, sys1_config=None, sys1_evaluator=None, sys1_state_factory=None, skip_sys1=False, skip_llm=False,
 ):
     """
     Standalone decorator to protect functions with Nova scanning.
@@ -92,14 +92,14 @@ def protect(
         nonlocal nova_instance
 
         if nova_instance is None:
-            if rules_path or policy or jev_config is not None or jev_evaluator is not None:
+            if rules_path or policy or sys1_config is not None or sys1_evaluator is not None:
                 # Create new instance with provided config
                 from .nova import Nova
                 nova_instance = Nova(
                     rules_path=rules_path,
                     policy=policy,
                     llm_provider=llm_provider,
-                    llm_model=llm_model, jev_config=jev_config, jev_evaluator=jev_evaluator
+                    llm_model=llm_model, sys1_config=sys1_config, sys1_evaluator=sys1_evaluator
                 )
             else:
                 nova_instance = get_default_nova()
@@ -111,7 +111,7 @@ def protect(
             param_name=param_name,
             on_block=on_block,
             raise_on_block=raise_on_block,
-            jev_state_factory=jev_state_factory, skip_jev=skip_jev, skip_llm=skip_llm,
+            sys1_state_factory=sys1_state_factory, skip_sys1=skip_sys1, skip_llm=skip_llm,
         )(func)
 
     return decorator
@@ -122,7 +122,7 @@ def scan(
     rules_path: Optional[Union[str, Path, List[str]]] = None,
     policy: Optional[dict] = None,
     nova_instance: Optional["Nova"] = None,
-    *, jev_config=None, jev_evaluator=None, jev_state=None, skip_jev=False, skip_llm=False,
+    *, sys1_config=None, sys1_evaluator=None, sys1_state=None, skip_sys1=False, skip_llm=False,
 ) -> "ScanResult":
     """
     Standalone scan function for quick scanning without instance management.
@@ -144,13 +144,13 @@ def scan(
             print("Blocked!")
     """
     if nova_instance is None:
-        if rules_path or policy or jev_config is not None or jev_evaluator is not None:
+        if rules_path or policy or sys1_config is not None or sys1_evaluator is not None:
             from .nova import Nova
-            nova_instance = Nova(rules_path=rules_path, policy=policy, jev_config=jev_config, jev_evaluator=jev_evaluator)
+            nova_instance = Nova(rules_path=rules_path, policy=policy, sys1_config=sys1_config, sys1_evaluator=sys1_evaluator)
         else:
             nova_instance = get_default_nova()
 
-    return nova_instance.scan(text, jev_state=jev_state, skip_jev=skip_jev, skip_llm=skip_llm)
+    return nova_instance.scan(text, sys1_state=sys1_state, skip_sys1=skip_sys1, skip_llm=skip_llm)
 
 
 async def scan_async(
@@ -158,7 +158,7 @@ async def scan_async(
     rules_path: Optional[Union[str, Path, List[str]]] = None,
     policy: Optional[dict] = None,
     nova_instance: Optional["Nova"] = None,
-    *, jev_config=None, jev_evaluator=None, jev_state=None, skip_jev=False, skip_llm=False,
+    *, sys1_config=None, sys1_evaluator=None, sys1_state=None, skip_sys1=False, skip_llm=False,
 ) -> "ScanResult":
     """
     Async standalone scan function.
@@ -173,10 +173,10 @@ async def scan_async(
         ScanResult with match details
     """
     if nova_instance is None:
-        if rules_path or policy or jev_config is not None or jev_evaluator is not None:
+        if rules_path or policy or sys1_config is not None or sys1_evaluator is not None:
             from .nova import Nova
-            nova_instance = Nova(rules_path=rules_path, policy=policy, jev_config=jev_config, jev_evaluator=jev_evaluator)
+            nova_instance = Nova(rules_path=rules_path, policy=policy, sys1_config=sys1_config, sys1_evaluator=sys1_evaluator)
         else:
             nova_instance = get_default_nova()
 
-    return await nova_instance.scan_async(text, jev_state=jev_state, skip_jev=skip_jev, skip_llm=skip_llm)
+    return await nova_instance.scan_async(text, sys1_state=sys1_state, skip_sys1=skip_sys1, skip_llm=skip_llm)

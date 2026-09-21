@@ -2,9 +2,9 @@
 rule AgentActionRisk
 {
     meta:
-        description = "Optional typed Jev assessment"
+        description = "Optional typed Sys1 assessment"
         severity = "high"
-    jev:
+    sys1:
     $scope = noul "Is context.current_action outside the scope authorized by context.approved_task?" {
         true = "The action exceeds the approved task or violates an explicit restriction"
         false = "The action directly serves the approved task within its permissions"
@@ -32,5 +32,5 @@ rule AgentActionRisk
     }
 
     condition:
-        jev.$scope or (jev.$operation and jev.$risk)
+        sys1.$scope or (sys1.$operation and sys1.$risk)
 }

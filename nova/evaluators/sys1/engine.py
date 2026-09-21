@@ -1,9 +1,9 @@
-"""Scan-local staged evaluation for rules containing Jev declarations."""
+"""Scan-local staged evaluation for rules containing Sys1 declarations."""
 
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
-from nova.core.jev import Predicate, NovaEvaluationError
+from nova.core.sys1 import Predicate, NovaEvaluationError
 from .condition import compile_condition, declarations
 from .projection import record
 from .state import snapshot_state
@@ -12,7 +12,7 @@ from .state import snapshot_state
 @dataclass
 class Progress:
     values: dict = field(default_factory=dict)
-    jev: dict = field(default_factory=dict)
+    sys1: dict = field(default_factory=dict)
     errors: dict = field(default_factory=dict)
     semantic_scores: dict = field(default_factory=dict)
     llm_scores: dict = field(default_factory=dict)
@@ -20,13 +20,13 @@ class Progress:
     batches: list = field(default_factory=list)
 
 
-def evaluate(matcher, text, state, *, skip_llm=False, skip_jev=False, fast=False, progress=None):
+def evaluate(matcher, text, state, *, skip_llm=False, skip_sys1=False, fast=False, progress=None):
     rule = matcher.rule
     node = compile_condition(rule)
-    progress = progress or Progress(jev={name: record(pattern) for name, pattern in rule.jev.items()})
+    progress = progress or Progress(sys1={name: record(pattern) for name, pattern in rule.sys1.items()})
     groups = declarations(rule)
-    for section in ("keywords", "semantics", "jev", "llm"):
-        if fast and section in ("jev", "llm"):
+    for section in ("keywords", "semantics", "sys1", "llm"):
+        if fast and section in ("sys1", "llm"):
             break
         needed = node.needed(progress.values)
         patterns = {name: pattern for name, pattern in groups[section].items()
@@ -34,29 +34,29 @@ def evaluate(matcher, text, state, *, skip_llm=False, skip_jev=False, fast=False
                     and f"{section}.{name}" not in progress.values}
         if not patterns:
             continue
-        if section == "jev":
-            if skip_jev or not matcher.jev_config.enabled:
+        if section == "sys1":
+            if skip_sys1 or not matcher.sys1_config.enabled:
                 for name in patterns:
-                    progress.jev[name].status = "unavailable"
-                    progress.jev[name].reason = "skipped" if skip_jev else "disabled"
+                    progress.sys1[name].status = "unavailable"
+                    progress.sys1[name].reason = "skipped" if skip_sys1 else "disabled"
             else:
                 try:
-                    batch = matcher.jev_evaluator.evaluate_many(patterns, state)
+                    batch = matcher.sys1_evaluator.evaluate_many(patterns, state)
                     progress.batches.append(batch.metadata)
                     for name in patterns:
                         entry = batch.evaluations.get(name)
                         if entry is None or not isinstance(entry.predicate, Predicate):
-                            progress.jev[name].status, progress.jev[name].reason = "error", "missing_answer"
+                            progress.sys1[name].status, progress.sys1[name].reason = "error", "missing_answer"
                         else:
-                            progress.jev[name] = entry
+                            progress.sys1[name] = entry
                 except Exception:
                     for name in patterns:
-                        progress.jev[name].status, progress.jev[name].reason = "error", "evaluator_error"
+                        progress.sys1[name].status, progress.sys1[name].reason = "error", "evaluator_error"
             for name in patterns:
-                entry = progress.jev[name]
-                progress.values[f"jev.{name}"] = entry.predicate
+                entry = progress.sys1[name]
+                progress.values[f"sys1.{name}"] = entry.predicate
                 if entry.predicate is Predicate.UNKNOWN:
-                    progress.errors[f"jev.{name}"] = entry.reason or "unavailable"
+                    progress.errors[f"sys1.{name}"] = entry.reason or "unavailable"
             continue
         for name, pattern in patterns.items():
             ref = f"{section}.{name}"
@@ -86,7 +86,7 @@ def evaluate(matcher, text, state, *, skip_llm=False, skip_jev=False, fast=False
                 progress.values[ref] = Predicate.UNKNOWN
     outcome = node.evaluate(progress.values)
     if not fast or outcome is not Predicate.UNKNOWN:
-        for entry in progress.jev.values():
+        for entry in progress.sys1.values():
             if entry.status == "pending":
                 entry.status, entry.reason = "skipped", "condition_determined" if outcome is not Predicate.UNKNOWN else "unreferenced"
     matches = {section: {name: True for name in patterns if progress.values.get(f"{section}.{name}") is Predicate.TRUE}
@@ -94,10 +94,10 @@ def evaluate(matcher, text, state, *, skip_llm=False, skip_jev=False, fast=False
     result = {
         "matched": outcome is Predicate.TRUE, "rule_name": rule.name, "meta": rule.meta,
         "matching_keywords": matches["keywords"], "matching_semantics": matches["semantics"],
-        "matching_llm": matches["llm"], "matching_jev": matches["jev"],
+        "matching_llm": matches["llm"], "matching_sys1": matches["sys1"],
         "semantic_scores": progress.semantic_scores, "llm_scores": progress.llm_scores,
-        "jev_results": {name: entry.to_dict() for name, entry in progress.jev.items()},
-        "jev_batches": progress.batches, "evaluation_complete": outcome is not Predicate.UNKNOWN,
+        "sys1_results": {name: entry.to_dict() for name, entry in progress.sys1.items()},
+        "sys1_batches": progress.batches, "evaluation_complete": outcome is not Predicate.UNKNOWN,
         "debug": {"condition": rule.condition, "condition_result": outcome.value,
                   "evaluation_warnings": [f"{ref}: {reason}" for ref, reason in progress.errors.items()],
                   "all_keyword_matches": {key: progress.values[f"keywords.{key}"] is Predicate.TRUE for key in rule.keywords if f"keywords.{key}" in progress.values},
@@ -108,10 +108,10 @@ def evaluate(matcher, text, state, *, skip_llm=False, skip_jev=False, fast=False
     return result, progress
 
 
-def collect(rules, matchers, original_text, text, *, context=None, skip_llm=False, skip_jev=False, parallel=True):
+def collect(rules, matchers, original_text, text, *, context=None, skip_llm=False, skip_sys1=False, parallel=True):
     """Fast pass then model pass, retaining evidence locally and all definite findings."""
-    jev_matchers = [matchers[rule.name] for rule in rules if rule.jev]
-    limit = min(matcher.jev_config.max_request_bytes for matcher in jev_matchers)
+    sys1_matchers = [matchers[rule.name] for rule in rules if rule.sys1]
+    limit = min(matcher.sys1_config.max_request_bytes for matcher in sys1_matchers)
     invalid_state = False
     try:
         state = snapshot_state(original_text, context, limit)
@@ -120,7 +120,7 @@ def collect(rules, matchers, original_text, text, *, context=None, skip_llm=Fals
     results, pending, causes = {}, [], []
     for rule in rules:
         matcher = matchers[rule.name]
-        if rule.jev:
+        if rule.sys1:
             result, progress = evaluate(matcher, text, state, fast=True)
             results[rule.name] = result
             if not result["evaluation_complete"]:
@@ -137,16 +137,16 @@ def collect(rules, matchers, original_text, text, *, context=None, skip_llm=Fals
 
     def finish(item):
         rule, progress = item
-        if not rule.jev:
+        if not rule.sys1:
             return rule.name, matchers[rule.name].check_prompt(text), []
         if invalid_state:
-            for name in rule.jev:
-                progress.values[f"jev.{name}"] = Predicate.UNKNOWN
-                progress.errors[f"jev.{name}"] = "invalid_state"
-                progress.jev[name].status, progress.jev[name].reason = "error", "invalid_state"
+            for name in rule.sys1:
+                progress.values[f"sys1.{name}"] = Predicate.UNKNOWN
+                progress.errors[f"sys1.{name}"] = "invalid_state"
+                progress.sys1[name].status, progress.sys1[name].reason = "error", "invalid_state"
         try:
             result, _ = evaluate(matchers[rule.name], text, state, skip_llm=skip_llm,
-                                 skip_jev=skip_jev, progress=progress)
+                                 skip_sys1=skip_sys1, progress=progress)
             return rule.name, result, []
         except NovaEvaluationError as error:
             return rule.name, error.partial_result, error.causes

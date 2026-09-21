@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 import re
-from nova.core.jev import Predicate
+from nova.core.sys1 import Predicate
 
 T, F, U = Predicate.TRUE, Predicate.FALSE, Predicate.UNKNOWN
 
@@ -36,11 +36,11 @@ class Node:
 
 
 def declarations(rule):
-    return {"keywords": rule.keywords, "semantics": rule.semantics, "llm": rule.llms, "jev": rule.jev}
+    return {"keywords": rule.keywords, "semantics": rule.semantics, "llm": rule.llms, "sys1": rule.sys1}
 
 
 class Compiler:
-    token = re.compile(r"(?:keywords|semantics|llm|jev)\.(?:\$[A-Za-z0-9_]+\*?|\*)|\$[A-Za-z0-9_]+\*?|[A-Za-z_][A-Za-z0-9_]*|\d+|[()]")
+    token = re.compile(r"(?:keywords|semantics|llm|sys1)\.(?:\$[A-Za-z0-9_]+\*?|\*)|\$[A-Za-z0-9_]+\*?|[A-Za-z_][A-Za-z0-9_]*|\d+|[()]")
 
     def __init__(self, condition, sections):
         self.tokens = []

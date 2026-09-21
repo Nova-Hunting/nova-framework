@@ -1,4 +1,4 @@
-"""Explicit Jev configuration, independent from NOVA's LLM settings."""
+"""Explicit Sys1 configuration, independent from NOVA's LLM settings."""
 
 from dataclasses import dataclass, fields
 import math
@@ -6,7 +6,7 @@ import os
 
 
 @dataclass(frozen=True)
-class JevConfig:
+class Sys1Config:
     enabled: bool = False
     provider: str = "openrouter"
     model: str = "typesafe/jev-1.13"
@@ -19,20 +19,20 @@ class JevConfig:
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
-            raise ValueError("Jev enabled must be boolean")
+            raise ValueError("Sys1 enabled must be boolean")
         if self.provider != "openrouter":
-            raise ValueError("Jev provider must be openrouter")
+            raise ValueError("Sys1 provider must be openrouter")
         if not isinstance(self.model, str) or not self.model.strip():
-            raise ValueError("Jev model must be nonempty")
+            raise ValueError("Sys1 model must be nonempty")
         for name in ("connect_timeout_seconds", "timeout_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 < value <= 120:
-                raise ValueError(f"Jev {name} must be within (0, 120]")
+                raise ValueError(f"Sys1 {name} must be within (0, 120]")
         for name, low, high in (("retries", 0, 2), ("max_concurrency", 1, 32),
                                 ("max_request_bytes", 1, 10485760), ("max_response_bytes", 1, 10485760)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
-                raise ValueError(f"Jev {name} must be an integer within [{low}, {high}]")
+                raise ValueError(f"Sys1 {name} must be an integer within [{low}, {high}]")
 
     @classmethod
     def resolve(cls, options=None, config=None):
@@ -41,13 +41,13 @@ class JevConfig:
         if config is None:
             from nova.utils.config import get_config
             config = get_config()
-        values = dict(config.config.get("jev", {}))
+        values = dict(config.config.get("sys1", {}))
         for field in fields(cls):
-            value = os.environ.get("NOVA_JEV_" + field.name.upper())
+            value = os.environ.get("NOVA_SYS1_" + field.name.upper())
             if value is not None:
                 if field.name == "enabled":
                     if value.lower() not in ("true", "false", "1", "0", "yes", "no"):
-                        raise ValueError("NOVA_JEV_ENABLED must be boolean")
+                        raise ValueError("NOVA_SYS1_ENABLED must be boolean")
                     value = value.lower() in ("true", "1", "yes")
                 elif field.type in (int, float):
                     value = field.type(value)
@@ -59,5 +59,5 @@ class JevConfig:
         values.update(options or {})
         unknown = set(values) - {field.name for field in fields(cls)}
         if unknown:
-            raise ValueError("Unknown Jev settings: " + ", ".join(sorted(unknown)))
+            raise ValueError("Unknown Sys1 settings: " + ", ".join(sorted(unknown)))
         return cls(**values)

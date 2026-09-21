@@ -2,9 +2,9 @@
 rule ActionImpact
 {
     meta:
-        description = "Optional typed Jev assessment"
+        description = "Optional typed Sys1 assessment"
         severity = "high"
-    jev:
+    sys1:
     $risk = score "What is the potential impact of the proposed action in text?" {
         levels = [
             "No persistent changes or sensitive exposure",
@@ -17,5 +17,5 @@ rule ActionImpact
     }
 
     condition:
-        jev.$risk
+        sys1.$risk
 }

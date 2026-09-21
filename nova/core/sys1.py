@@ -1,4 +1,4 @@
-"""Provider-independent Jev declarations and evidence."""
+"""Provider-independent Sys1 declarations and evidence."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -88,7 +88,7 @@ class ScorePattern:
         object.__setattr__(self, "levels", tuple(self.levels))
 
 
-JevPattern = Union[NoulPattern, ChoicePattern, ScorePattern]
+Sys1Pattern = Union[NoulPattern, ChoicePattern, ScorePattern]
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class ScoreAnswer:
     legend: Optional[dict[str, str]] = None
 
 
-JevAnswer = Union[NoulAnswer, ChoiceAnswer, ScoreAnswer]
+Sys1Answer = Union[NoulAnswer, ChoiceAnswer, ScoreAnswer]
 
 
 def primitive(pattern):
@@ -119,12 +119,12 @@ def primitive(pattern):
 
 
 @dataclass
-class JevEvaluation:
+class Sys1Evaluation:
     primitive: str
     predicate: Predicate = Predicate.UNKNOWN
     status: str = "pending"
     reason: Optional[str] = None
-    answer: Optional[JevAnswer] = None
+    answer: Optional[Sys1Answer] = None
     settings: dict[str, Any] = field(default_factory=dict)
     question_id: Optional[str] = None
     requested_model: Optional[str] = None
@@ -143,8 +143,8 @@ class JevEvaluation:
 
 
 @dataclass
-class JevBatch:
-    evaluations: dict[str, JevEvaluation]
+class Sys1Batch:
+    evaluations: dict[str, Sys1Evaluation]
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

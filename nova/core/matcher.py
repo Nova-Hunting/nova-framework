@@ -68,7 +68,7 @@ class NovaMatcher:
                  keyword_evaluator: Optional[DefaultKeywordEvaluator] = None,
                  semantic_evaluator: Optional[Any] = None,  # DefaultSemanticEvaluator might not be available
                  llm_evaluator: Optional[Any] = None,       # LLMEvaluator might not be available
-                 create_llm_evaluator: bool = True, *, jev_config=None, jev_evaluator=None):
+                 create_llm_evaluator: bool = True, *, sys1_config=None, sys1_evaluator=None):
         """
         Initialize the matcher with a rule and optional custom evaluators.
         Only initializes evaluators when needed based on rule content.
@@ -82,14 +82,14 @@ class NovaMatcher:
                                   If False, and llm_evaluator is None, no LLM evaluations will be performed.
         """
         self.rule = rule
-        self._jev_options = jev_config
-        self.jev_config = None
-        self.jev_evaluator = jev_evaluator
-        if rule and rule.jev:
-            from nova.evaluators.jev.config import JevConfig
-            from nova.evaluators.jev.openrouter import OpenRouterJevEvaluator
-            self.jev_config = JevConfig.resolve(jev_config)
-            self.jev_evaluator = jev_evaluator or OpenRouterJevEvaluator(self.jev_config)
+        self._sys1_options = sys1_config
+        self.sys1_config = None
+        self.sys1_evaluator = sys1_evaluator
+        if rule and rule.sys1:
+            from nova.evaluators.sys1.config import Sys1Config
+            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            self.sys1_config = Sys1Config.resolve(sys1_config)
+            self.sys1_evaluator = sys1_evaluator or OpenRouterSys1Evaluator(self.sys1_config)
         
         # Always initialize keyword evaluator since it's lightweight
         self.keyword_evaluator = keyword_evaluator or DefaultKeywordEvaluator()
@@ -167,11 +167,11 @@ class NovaMatcher:
             rule: The new NovaRule to match against
         """
         self.rule = rule
-        if rule and rule.jev and self.jev_config is None:
-            from nova.evaluators.jev.config import JevConfig
-            from nova.evaluators.jev.openrouter import OpenRouterJevEvaluator
-            self.jev_config = JevConfig.resolve(self._jev_options)
-            self.jev_evaluator = self.jev_evaluator or OpenRouterJevEvaluator(self.jev_config)
+        if rule and rule.sys1 and self.sys1_config is None:
+            from nova.evaluators.sys1.config import Sys1Config
+            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            self.sys1_config = Sys1Config.resolve(self._sys1_options)
+            self.sys1_evaluator = self.sys1_evaluator or OpenRouterSys1Evaluator(self.sys1_config)
         self._precompile_patterns()
         # Update cached condition analysis for new rule
         if rule:
@@ -255,7 +255,7 @@ class NovaMatcher:
         
         return needed_patterns
         
-    def check_prompt(self, prompt: str, skip_llm: bool = False, *, jev_state=None, skip_jev=False) -> Dict[str, Any]:
+    def check_prompt(self, prompt: str, skip_llm: bool = False, *, sys1_state=None, skip_sys1=False) -> Dict[str, Any]:
         """
         Check if a prompt matches the rule.
 
@@ -269,11 +269,11 @@ class NovaMatcher:
         Returns:
             Dictionary containing match results and details
         """
-        if self.rule.jev:
-            from nova.evaluators.jev.engine import collect
-            from nova.core.jev import NovaEvaluationError
+        if self.rule.sys1:
+            from nova.evaluators.sys1.engine import collect
+            from nova.core.sys1 import NovaEvaluationError
             results, causes = collect([self.rule], {self.rule.name: self}, prompt, prompt,
-                                      context=jev_state, skip_llm=skip_llm, skip_jev=skip_jev, parallel=False)
+                                      context=sys1_state, skip_llm=skip_llm, skip_sys1=skip_sys1, parallel=False)
             result = results[0][1]
             if causes:
                 raise NovaEvaluationError(result, causes)

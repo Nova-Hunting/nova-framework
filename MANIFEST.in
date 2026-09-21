@@ -37,4 +37,4 @@ recursive-include scripts *.py
 recursive-include tests *.py
 
 recursive-include docs *.md
-recursive-include examples/jev *.py *.nov
+recursive-include examples/sys1 *.py *.nov

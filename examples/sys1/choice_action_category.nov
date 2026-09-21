@@ -2,9 +2,9 @@
 rule ActionCategory
 {
     meta:
-        description = "Optional typed Jev assessment"
+        description = "Optional typed Sys1 assessment"
         severity = "high"
-    jev:
+    sys1:
     $operation = choice "Which primary operation does text propose?" {
         options = {
             read = "Read ordinary information"
@@ -17,5 +17,5 @@ rule ActionCategory
     }
 
     condition:
-        jev.$operation
+        sys1.$operation
 }

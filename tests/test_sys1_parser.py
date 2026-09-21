@@ -2,7 +2,7 @@ import pytest
 
 from nova.core.parser import NovaParser, NovaParserError
 from nova.core.rule_file import NovaRuleFileParser
-from nova.core.jev import NoulPattern, ChoicePattern, ScorePattern
+from nova.core.sys1 import NoulPattern, ChoicePattern, ScorePattern
 
 
 DECLARATIONS = '''
@@ -29,8 +29,8 @@ DECLARATIONS = '''
 '''
 
 
-def source(condition="any of jev", declarations=DECLARATIONS, extra="", name="Risk"):
-    return f"rule {name} {{\n{extra}\njev:\n{declarations}\ncondition:\n{condition}\n}}"
+def source(condition="any of sys1", declarations=DECLARATIONS, extra="", name="Risk"):
+    return f"rule {name} {{\n{extra}\nsys1:\n{declarations}\ncondition:\n{condition}\n}}"
 
 
 def test_mixed_nested_file_and_regex_literals():
@@ -38,10 +38,10 @@ def test_mixed_nested_file_and_regex_literals():
     text += '\n# closing braces } do not count\nrule Legacy {\nkeywords:\n$x = "x"\ncondition:\n$x\n}'
     rules = NovaRuleFileParser().parse_content(text)
     assert len(rules) == 2
-    assert isinstance(rules[0].jev['$scope'], NoulPattern)
-    assert isinstance(rules[0].jev['$operation'], ChoicePattern)
-    assert isinstance(rules[0].jev['$risk'], ScorePattern)
-    assert rules[0].jev['$risk'].threshold == 1.5
+    assert isinstance(rules[0].sys1['$scope'], NoulPattern)
+    assert isinstance(rules[0].sys1['$operation'], ChoicePattern)
+    assert isinstance(rules[0].sys1['$risk'], ScorePattern)
+    assert rules[0].sys1['$risk'].threshold == 1.5
 
 
 @pytest.mark.parametrize("old,new", [
@@ -61,21 +61,21 @@ def test_invalid_declarations(old, new):
         NovaParser().parse(source(declarations=DECLARATIONS.replace(old, new)))
 
 
-@pytest.mark.parametrize("condition", ["jev.$missing", "jev.$risk.score >= 2", "not", "jev.$scope jev.$risk", "4 of jev"])
+@pytest.mark.parametrize("condition", ["sys1.$missing", "sys1.$risk.score >= 2", "not", "sys1.$scope sys1.$risk", "4 of sys1"])
 def test_invalid_conditions(condition):
     with pytest.raises(NovaParserError):
         NovaParser().parse(source(condition))
 
 
 def test_trailing_content_unclosed_and_duplicate_sections():
-    for text in [source() + "junk", source()[:-2], source(extra="jev:\n")]:
+    for text in [source() + "junk", source()[:-2], source(extra="sys1:\n")]:
         with pytest.raises(NovaParserError):
             NovaParser().parse(text)
 
 
 def test_qualified_duplicate_names_allowed_but_ambiguous_bare_reference_rejected():
     extra = 'keywords:\n$scope = "scope"\n'
-    NovaParser().parse(source("keywords.$scope or jev.$scope", extra=extra))
+    NovaParser().parse(source("keywords.$scope or sys1.$scope", extra=extra))
     with pytest.raises(NovaParserError, match="Ambiguous"):
         NovaParser().parse(source("$scope", extra=extra))
 
@@ -97,10 +97,16 @@ $x
     assert parsed.meta["url"] == "https://example.com"
     question = DECLARATIONS.replace('Outside approved scope? {literal}', r'Is "quoted" text outside scope?'.replace('"', r'\"'))
     parsed = NovaParser().parse(source(declarations=question))
-    assert '"quoted"' in parsed.jev["$scope"].instructions
+    assert '"quoted"' in parsed.sys1["$scope"].instructions
 
 
-@pytest.mark.parametrize("condition", ["jev", "$s*"])
+@pytest.mark.parametrize("condition", ["sys1", "$s*"])
 def test_no_section_or_wildcard_shorthand(condition):
     with pytest.raises(NovaParserError):
         NovaParser().parse(source(condition))
+
+
+def test_old_section_reports_migration_instead_of_evaluating_it():
+    old = source().replace("sys1:", "jev:").replace("of sys1", "of jev")
+    with pytest.raises(NovaParserError, match="renamed to 'sys1:'"):
+        NovaParser().parse(old)

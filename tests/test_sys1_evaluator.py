@@ -4,10 +4,10 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from nova.core.jev import NoulPattern, ChoicePattern, ScorePattern, Predicate
-from nova.evaluators.jev.config import JevConfig
-from nova.evaluators.jev.openrouter import OpenRouterJevEvaluator
-from nova.evaluators.jev.projection import validate_answer, project
+from nova.core.sys1 import NoulPattern, ChoicePattern, ScorePattern, Predicate
+from nova.evaluators.sys1.config import Sys1Config
+from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+from nova.evaluators.sys1.projection import validate_answer, project
 
 NOUL = NoulPattern("Outside?", "Yes", "No", .7)
 CHOICE = ChoicePattern("Operation?", {"read": "Read", "write": "Write"}, ("write",), .6)
@@ -56,7 +56,7 @@ def response(payload, status=200, headers=None):
 def evaluator(responses, **config):
     session = Mock()
     session.post.side_effect = responses
-    return OpenRouterJevEvaluator(JevConfig(enabled=True, **config), api_key="synthetic-key", session_factory=lambda: session), session
+    return OpenRouterSys1Evaluator(Sys1Config(enabled=True, **config), api_key="synthetic-key", session_factory=lambda: session), session
 
 
 def test_mixed_batch_mapping_and_local_settings():
@@ -94,7 +94,7 @@ def test_bounded_retries(failure, expected, calls):
 def test_explicit_activation_and_limits(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key")
     session = Mock()
-    ev = OpenRouterJevEvaluator(JevConfig(), session_factory=lambda: session)
+    ev = OpenRouterSys1Evaluator(Sys1Config(), session_factory=lambda: session)
     assert ev.evaluate_many({"$n": NOUL}, "synthetic").evaluations["$n"].reason == "disabled"
     session.post.assert_not_called()
     ev, session = evaluator([], max_request_bytes=10)
