@@ -112,6 +112,8 @@ class Compiler:
             if not refs or count < 1 or count > len(refs):
                 raise ValueError("Quantifier count must be within declared variables")
             return Node("count", references=refs, count=count)
+        if token in self.sections or (token.startswith("$") and token.endswith("*")):
+            raise ValueError("Use a qualified wildcard or a quantifier")
         return Node("count", references=self.refs(token))
 
 

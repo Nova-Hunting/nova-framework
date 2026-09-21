@@ -78,3 +78,29 @@ def test_qualified_duplicate_names_allowed_but_ambiguous_bare_reference_rejected
     NovaParser().parse(source("keywords.$scope or jev.$scope", extra=extra))
     with pytest.raises(NovaParserError, match="Ambiguous"):
         NovaParser().parse(source("$scope", extra=extra))
+
+
+def test_legacy_unquoted_metadata_and_new_escaped_questions():
+    legacy = '''rule Legacy {
+meta:
+description = Explanation: ordinary text
+author = O'Reilly
+url = https://example.com
+keywords:
+$x = "x"
+condition:
+$x
+}'''
+    parsed = NovaParser().parse(legacy)
+    assert parsed.meta["description"] == "Explanation: ordinary text"
+    assert parsed.meta["author"] == "O'Reilly"
+    assert parsed.meta["url"] == "https://example.com"
+    question = DECLARATIONS.replace('Outside approved scope? {literal}', r'Is "quoted" text outside scope?'.replace('"', r'\"'))
+    parsed = NovaParser().parse(source(declarations=question))
+    assert '"quoted"' in parsed.jev["$scope"].instructions
+
+
+@pytest.mark.parametrize("condition", ["jev", "$s*"])
+def test_no_section_or_wildcard_shorthand(condition):
+    with pytest.raises(NovaParserError):
+        NovaParser().parse(source(condition))

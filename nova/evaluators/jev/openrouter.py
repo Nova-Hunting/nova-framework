@@ -11,6 +11,10 @@ from .config import JevConfig
 from .projection import question, record, validate_answer, project
 
 
+def reject_constant(value):
+    raise ValueError("Nonfinite JSON number")
+
+
 class TransportError(Exception):
     """A safe diagnostic code, never a response body or request state."""
 
@@ -63,7 +67,7 @@ class OpenRouterJevEvaluator:
                             raise TransportError("response_too_large")
                         chunks.append(chunk)
                     try:
-                        return json.loads(b"".join(chunks))
+                        return json.loads(b"".join(chunks), parse_constant=reject_constant)
                     except (ValueError, UnicodeError):
                         raise TransportError("invalid_response") from None
             except requests.ConnectTimeout:

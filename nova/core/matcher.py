@@ -270,14 +270,14 @@ class NovaMatcher:
             Dictionary containing match results and details
         """
         if self.rule.jev:
-            from nova.evaluators.jev.engine import evaluate
-            from nova.evaluators.jev.state import snapshot_state
+            from nova.evaluators.jev.engine import collect
             from nova.core.jev import NovaEvaluationError
-            try:
-                state = snapshot_state(prompt, jev_state, self.jev_config.max_request_bytes)
-            except (ValueError, RecursionError, UnicodeError):
-                raise NovaEvaluationError({"evaluation_complete": False}, ["invalid_state"]) from None
-            return evaluate(self, prompt, state, skip_llm=skip_llm, skip_jev=skip_jev)[0]
+            results, causes = collect([self.rule], {self.rule.name: self}, prompt, prompt,
+                                      context=jev_state, skip_llm=skip_llm, skip_jev=skip_jev, parallel=False)
+            result = results[0][1]
+            if causes:
+                raise NovaEvaluationError(result, causes)
+            return result
 
         # Use cached condition analysis (pre-computed at initialization)
         condition = self.rule.condition

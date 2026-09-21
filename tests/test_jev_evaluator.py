@@ -107,3 +107,25 @@ def test_optional_metadata_absence_and_probability_rounding():
     answer = validate_answer(pattern, {"type": "score", "score": 1, "probabilities": {"0": .33, "1": .33, "2": .33}})
     assert answer.confidence is None and answer.legend is None
     assert project(pattern, answer).predicate is Predicate.TRUE
+
+
+def test_missing_answer_does_not_erase_valid_sibling_and_cost_count():
+    ev, session = evaluator([response({"answers": {"q0": {"type": "noul", "noul": .9}}})])
+    result = ev.evaluate_many({"$n": NOUL, "$s": SCORE}, "synthetic")
+    assert result.evaluations["$n"].predicate is Predicate.TRUE
+    assert result.evaluations["$s"].reason == "invalid_answer"
+    assert result.metadata["request_count"] == session.post.call_count == 1
+
+
+def test_response_size_and_retry_after_limit():
+    ev, session = evaluator([response({"answers": {"q0": {"type": "noul", "noul": .9}}})], max_response_bytes=5)
+    assert ev.evaluate_many({"$n": NOUL}, "synthetic").evaluations["$n"].reason == "response_too_large"
+    ev, session = evaluator([response({}, 429, {"Retry-After": "100"})])
+    assert ev.evaluate_many({"$n": NOUL}, "synthetic").evaluations["$n"].reason == "retry_after_exceeds_limit"
+    assert session.post.call_count == 1
+
+
+def test_selected_choice_not_combined_match_probability():
+    pattern = ChoicePattern("Operation?", {"read": "Read", "write": "Write", "delete": "Delete"}, ("write", "delete"))
+    raw = {"type": "choice", "choice": "read", "probabilities": {"read": .4, "write": .3, "delete": .3}, "confidence": .01}
+    assert project(pattern, validate_answer(pattern, raw)).predicate is Predicate.FALSE

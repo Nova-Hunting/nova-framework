@@ -197,7 +197,7 @@ class NovaScanner:
 
         for rule in self.rules:
             matcher = self._matchers[rule.name]
-            result = matcher.check_prompt(prompt)
+            result = matcher.check_prompt(prompt, skip_llm=skip_llm)
             
             if result['matched']:
                 results.append(result)
@@ -236,7 +236,7 @@ class NovaScanner:
         
         for rule in self.rules:
             matcher = self._matchers[rule.name]
-            result = matcher.check_prompt(prompt)
+            result = matcher.check_prompt(prompt, skip_llm=skip_llm)
             
             # Add to matches list if matched
             if result['matched']:

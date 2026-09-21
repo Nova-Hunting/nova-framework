@@ -194,3 +194,38 @@ def test_state_snapshot_and_cycle():
     context["cycle"] = context
     with pytest.raises(ValueError, match="cycle"):
         snapshot_state("action", context)
+
+
+def test_sdk_mixed_file_uses_structural_boundaries(tmp_path):
+    path = tmp_path / "mixed.nov"
+    path.write_text("// file comment\n" + source(name="First") + "\n# between rules\n" + source(name="Second"))
+    nova = Nova(rules_path=path, jev_config={"enabled": True}, jev_evaluator=FixtureEvaluator())
+    result = nova.scan("synthetic")
+    assert result.match_count == 2
+    assert set(result.jev_results) == {"First", "Second"}
+
+
+def test_indeterminate_check_can_be_irrelevant_after_llm_answer():
+    r = rule("jev.$operation or llm.$intent", extra='llm:\n$intent = "Intent?"(0.2)\n')
+    llm = Mock()
+    llm.evaluate_prompt.return_value = (True, .9, {})
+    matcher = NovaMatcher(r, llm_evaluator=llm, jev_config={"enabled": True}, jev_evaluator=FixtureEvaluator(.3))
+    result = matcher.check_prompt("synthetic")
+    assert result["matched"] and result["evaluation_complete"]
+    assert result["jev_results"]["$operation"]["reason"] == "insufficient_confidence"
+
+
+def test_state_does_not_leak_into_keyword_input():
+    r = rule("keywords.$key and jev.$scope", extra='keywords:\n$key = "credential"\n')
+    evaluator = FixtureEvaluator()
+    nova = Nova(rules=[r], jev_config={"enabled": True}, jev_evaluator=evaluator)
+    assert nova.scan("read README", jev_state={"history": "credential"}).clean
+    assert not evaluator.calls
+
+
+def test_irrelevant_invalid_context_agrees_across_entry_points():
+    r = rule("keywords.$key or jev.$scope", extra='keywords:\n$key = "secret"\n')
+    context = {"invalid": object()}
+    assert NovaMatcher(r).check_prompt("secret", jev_state=context)["matched"]
+    assert NovaScanner([r]).scan_with_details("secret", jev_state=context)["matched_any"]
+    assert Nova(rules=[r]).scan("secret", jev_state=context).matches

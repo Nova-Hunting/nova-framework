@@ -8,7 +8,6 @@ import functools
 import asyncio
 import time
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Union, Callable, Any
 from pathlib import Path
@@ -172,26 +171,18 @@ class Nova:
             self._handle_rule_load_error(path, f"could not read file: {e}", e)
             return
 
-        # Check if file contains multiple rules
-        rule_count = len(re.findall(r'^\s*rule\s+\w+\s*{?', content, flags=re.MULTILINE))
         loaded_before = len(self._rules)
-        if rule_count > 1:
-            # Parse multiple rules - split by 'rule ' keyword
+        try:
             rule_blocks = self._split_rule_blocks(content)
-            for index, block in enumerate(rule_blocks, start=1):
-                if block.strip():
-                    try:
-                        rule = parser.parse(block)
-                        self._append_rule(rule, path)
-                    except Exception as e:
-                        self._handle_rule_load_error(path, f"rule block #{index} failed to parse: {e}", e)
-        else:
-            # Single rule
+        except Exception as error:
+            self._handle_rule_load_error(path, f"failed to read rule boundaries: {error}", error)
+            return
+        for index, block in enumerate(rule_blocks, start=1):
             try:
-                rule = parser.parse(content)
+                rule = parser.parse(block)
                 self._append_rule(rule, path)
-            except Exception as e:
-                self._handle_rule_load_error(path, f"failed to parse rule: {e}", e)
+            except Exception as error:
+                self._handle_rule_load_error(path, f"rule block #{index} failed to parse: {error}", error)
 
         if len(self._rules) == loaded_before and not self._ignore_invalid_rules:
             raise NovaConfigError(f"No valid rules loaded from {path}")
@@ -212,10 +203,8 @@ class Nova:
 
     def _split_rule_blocks(self, content: str) -> List[str]:
         """Split content into individual rule blocks."""
-        # Split on 'rule' keyword at start of line or after newline
-        pattern = r'(?=^\s*rule\s+\w+)'
-        blocks = re.split(pattern, content, flags=re.IGNORECASE | re.MULTILINE)
-        return [b for b in blocks if b.strip()]
+        from nova.core.rule_file import NovaRuleFileParser
+        return NovaRuleFileParser()._extract_rule_blocks_optimized(content)
 
     def _initialize_evaluators(self) -> None:
         """Initialize shared evaluators (semantic, LLM) - load once, share across all matchers."""
