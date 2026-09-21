@@ -30,3 +30,17 @@ def test_fixture_quality_harness_marks_its_limits():
     assert '"http_requests": 0' in result.stdout
     assert '"indeterminate": 1' in result.stdout
     assert "not detection-quality measurements" in result.stdout
+
+
+def test_provider_comparison_retains_negative_and_incomplete_results(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "examples/sys1"))
+    from compare_providers import assess
+    from test_sys1_integration import FixtureEvaluator, rule
+    from nova.sdk import Nova
+    for confidence, noul, condition, indeterminate in [(.8, .1, "sys1.$scope", 1), (.1, .8, "sys1.$operation", 2)]:
+        nova = Nova(rules=[rule(condition)], sys1_config={"enabled": True},
+                    sys1_evaluator=FixtureEvaluator(confidence=confidence, noul=noul))
+        report = assess(nova, [("sample", "Read", "Read", False), ("missing", "", "Read", None)])
+        assert report["cases"][0]["results"]["Risk"]
+        assert report["metrics"]["indeterminate"] == indeterminate
+        assert report["metrics"]["reported_api_cost"] is None

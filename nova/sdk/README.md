@@ -343,6 +343,12 @@ pytest tests/test_sdk.py::TestNovaPolicy -v
 
 ## Optional Sys1 evaluation
 
+Local Laya uses the same rules and results. Install this checkout with `.[laya]`,
+prepare a checkpoint with `nova-sys1 prepare-laya`, then pass
+`sys1_config={"enabled": True, "provider": "laya", "model": "/path/to/prepared-model", "device": "cpu"}`.
+See the [local provider guide](../../docs/sys1.md#local-laya-provider) for explicit
+setup, CUDA selection, input limits and queue versus inference timeouts.
+
 Pass `sys1_config={"enabled": True}` to `Nova` to enable OpenRouter Decisions, and
 pass explicit context with `scan(text, sys1_state=context)`. `scan_async` supports
 the same options. `skip_llm=True` does not disable Sys1.

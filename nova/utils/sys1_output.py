@@ -69,11 +69,20 @@ def format_sys1_output(details, index, elapsed_ms, config, verbose=False, causes
                 if matches:
                     detail(f"Matched {section}", ", ".join(matches))
             for batch in result.get("sys1_batches", []):
+                if batch.get("provider") == "laya":
+                    detail("Local inference", "  |  ".join(
+                        f"{key}={batch[key]}" for key in
+                        ("checkpoint", "revision", "device", "inference_count", "load_ms", "inference_ms")
+                        if key in batch))
+                    if batch.get("calibration"):
+                        detail("Calibration", batch["calibration"])
+                    for warning in batch.get("warnings", []):
+                        detail("Warning", warning)
                 metadata = [f"{key}={batch[key]}" for key in ("id", "model", "provider") if batch.get(key) is not None]
                 if batch.get("request_count") is not None:
                     metadata.append(f"HTTP attempts={batch['request_count']}")
                 if metadata:
-                    detail("Request", "  |  ".join(metadata))
+                    detail("Model" if batch.get("provider") == "laya" else "Request", "  |  ".join(metadata))
                 if batch.get("usage"):
                     detail("Usage", ", ".join(f"{key}={value}" for key, value in batch["usage"].items()))
         # Sys1 reasons are already shown with their variables; retain other stage warnings.

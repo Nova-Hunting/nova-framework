@@ -26,6 +26,7 @@ SDIST_REQUIRED_FILES = {
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/dependabot.yml",
     ".github/workflows/ci.yml",
+    ".github/workflows/laya-compatibility.yml",
     ".github/workflows/codeql.yml",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
     ".github/ISSUE_TEMPLATE/feature_request.yml",
@@ -36,6 +37,7 @@ SDIST_REQUIRED_FILES = {
     "docs/sys1.md",
     "docs/design/sys1-section.md",
     "docs/design/laya-integration.md",
+    "docs/design/laya-validation.md",
     "examples/sys1/demo.py",
     "examples/sys1/evaluate_quality.py",
     "examples/sys1/agent_action_risk.nov",
@@ -55,6 +57,14 @@ SDIST_REQUIRED_FILES = {
     "nova/utils/log_buffer.py",
     "nova/core/sys1.py",
     "nova/evaluators/sys1/openrouter.py",
+    "nova/evaluators/sys1/laya.py",
+    "nova/evaluators/sys1/models.py",
+    "nova/evaluators/sys1/factory.py",
+    "tests/test_laya.py",
+    "tests/test_laya_models.py",
+    "tests/test_laya_runtime.py",
+    "tests/test_laya_live.py",
+    "examples/sys1/compare_providers.py",
     "nova/sdk/sys1_protection.py",
 }
 
@@ -64,6 +74,9 @@ WHEEL_REQUIRED_FILES = {
     "nova/utils/log_buffer.py",
     "nova/core/sys1.py",
     "nova/evaluators/sys1/openrouter.py",
+    "nova/evaluators/sys1/laya.py",
+    "nova/evaluators/sys1/models.py",
+    "nova/evaluators/sys1/factory.py",
     "nova/sdk/sys1_protection.py",
 }
 

@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- Optional local Laya provider for `sys1:` with explicit model preparation, CPU/CUDA device selection, token-exact overflow checks, native results and strict incomplete-evaluation errors.
+- `nova-sys1 prepare-laya`, the isolated `[laya]` installation extra, `--sys1-provider` and `--sys1-device`, and an opt-in provider comparison harness.
 - Optional `sys1:` declarations for Noul, Choice and Score through OpenRouter Decisions.
 - Three-state predicates, mixed batches, explicit context, rich diagnostics and strict incomplete-evaluation errors across core, SDK, decorators and CLI.
 - `--sys1`, `--skip-sys1`, `--sys1-model` and `--sys1-state` CLI options; separate Sys1 configuration and explicit activation.
@@ -10,7 +12,7 @@
 
 ### Changed
 - Renamed the unreleased `jev:` section to provider-independent `sys1:`, including CLI flags, SDK arguments, configuration, diagnostics and module paths. See `docs/sys1.md` for migration; the OpenRouter model identifier remains `typesafe/jev-1.13`.
-- Added a source-based Laya review and proposed local-provider integration in `docs/design/laya-integration.md`; Laya inference is not yet implemented.
+- Added a source-based Laya review and local-provider integration design in `docs/design/laya-integration.md`.
 - Rule boundaries now use a shared lexical reader for nested blocks, quoted strings, regex literals and comments. Legacy rule behavior and LLM temperature semantics remain unchanged.
 
 ## [0.3.1] - 2026-09-21

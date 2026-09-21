@@ -87,6 +87,7 @@ def main() -> None:
     audit_requirements("runtime", runtime)
     audit_requirements("semantic", semantic)
     audit_requirements("dev", dev)
+    audit_requirements("laya", dedupe(runtime + sections.get("laya", [])))
     print("dependency-audit-ok")
 
 

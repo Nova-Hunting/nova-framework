@@ -307,8 +307,8 @@ class Nova:
     def _initialize_matchers(self) -> None:
         """Create matchers for all rules, sharing evaluators."""
         if any(rule.sys1 for rule in self._rules) and self._sys1_evaluator is None:
-            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
-            self._sys1_evaluator = OpenRouterSys1Evaluator(self._sys1_options)
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
+            self._sys1_evaluator = create_sys1_evaluator(self._sys1_options)
         for rule in self._rules:
             self._matchers[rule.name] = NovaMatcher(
                 rule=rule,
@@ -847,8 +847,8 @@ class Nova:
             self._llm_evaluator = self._create_configured_llm_evaluator()
 
         if rule.sys1 and self._sys1_evaluator is None:
-            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
-            self._sys1_evaluator = OpenRouterSys1Evaluator(self._sys1_options)
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
+            self._sys1_evaluator = create_sys1_evaluator(self._sys1_options)
         self._rules.append(rule)
         self._matchers[rule.name] = NovaMatcher(
             rule=rule,

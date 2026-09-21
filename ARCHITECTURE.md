@@ -94,6 +94,8 @@ engine. Protection wrappers propagate incomplete evaluations before invocation.
 See the [contract](docs/design/sys1-section.md) and [usage guide](docs/sys1.md) for
 state envelopes, uncertainty, transport limits and configuration precedence.
 
-The section name is provider-independent. OpenRouter is the implemented adapter;
-the [Laya review and integration proposal](docs/design/laya-integration.md) describes
-an optional local adapter, including token-limit checks and calibration requirements.
+The section name is provider-independent. The factory selects OpenRouter or an optional local Laya adapter. Laya uses
+explicitly prepared, revision-pinned assets, lazy serialized inference and
+token-exact preflight. The [Laya source review and integration design](docs/design/laya-integration.md)
+and [usage guide](docs/sys1.md#local-laya-provider) describe setup, diagnostics and
+the limits of in-process timeouts.

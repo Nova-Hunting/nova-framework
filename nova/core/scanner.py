@@ -107,8 +107,8 @@ class NovaScanner:
     def _create_matcher(self, rule: NovaRule) -> NovaMatcher:
         """Create a matcher for a rule, with shared evaluators."""
         if rule.sys1 and self._sys1_evaluator is None:
-            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
-            self._sys1_evaluator = OpenRouterSys1Evaluator(self._sys1_options)
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
+            self._sys1_evaluator = create_sys1_evaluator(self._sys1_options)
         # Create matcher with shared LLM evaluator if one exists
         matcher = NovaMatcher(
             rule=rule,

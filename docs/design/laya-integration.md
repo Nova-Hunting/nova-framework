@@ -1,9 +1,9 @@
-# Laya source review and System 1 integration proposal
+# Laya source review and System 1 integration
 
-Reviewed 22 September 2026. Status: architecture proposal, not an implemented
-provider. The `sys1` rename is implemented; OpenRouter remains the only built-in
-System 1 provider. No Laya dependency or model weights were installed for this
-review, and no inference or independent benchmark was run.
+Reviewed 22 September 2026. Status: implemented on the local development branch. OpenRouter and optional
+local Laya share the System 1 contract. The source assessment below predates
+implementation; integration tests are not an independent quality benchmark.
+See the [usage and validation guide](../sys1.md#local-laya-provider).
 
 ## Assessment
 
@@ -75,7 +75,7 @@ flowchart TD
     A[sys1 declarations] --> B[Typed patterns and question compiler]
     B --> C[Sys1Evaluator.evaluate_many]
     C --> D[OpenRouterSys1Evaluator: implemented]
-    C --> E[LayaSys1Evaluator: proposed]
+    C --> E[LayaSys1Evaluator: optional local provider]
     D --> F[Validated typed answers]
     E --> F
     F --> G[Local threshold, match and confidence projection]
@@ -84,11 +84,11 @@ flowchart TD
 ```
 
 Keep the existing keywords → semantics → System 1 → LLM scheduling, short-circuit
-behavior and scan-local batching. Laya belongs in `nova/evaluators/sys1/laya.py`;
+behavior and scan-local batching. Laya is implemented in `nova/evaluators/sys1/laya.py`;
 it does not replace the semantic similarity evaluator. No new rule syntax or
 arbitrary result attributes are needed.
 
-| Existing boundary | Proposed Laya behavior |
+| Existing boundary | Laya behavior |
 |---|---|
 | `Sys1Evaluator.evaluate_many(patterns, state)` | One applicable mixed question batch per rule |
 | Question compiler in `projection.py` | Reuse `type`, `instructions`, `criteria`; keep rule settings local |
@@ -100,80 +100,22 @@ arbitrary result attributes are needed.
 | SDK protection | Required unavailable or invalid inference prevents invocation |
 | Results | Retain matches, nonmatches, native values, model identity and failure reasons |
 
-## Implementation sequence
+## Implemented decisions
 
-1. **Provider construction and optional dependencies.** Add one shared factory
-   used by matcher, scanner and SDK. Select the adapter from `Sys1Config.provider`.
-   Add an optional `laya` installation extra with a tested package/dependency
-   combination; base imports must not load Torch or Transformers. Respect NOVA's
-   dependency security floors rather than accepting every upstream minimum.
-   The current [Laya package metadata](https://github.com/NandhaKishorM/laya/blob/main/pyproject.toml)
-   requires Python 3.10+ and an ML runtime including Torch, Transformers,
-   safetensors, huggingface-hub and NumPy.
+- A shared factory constructs lazy adapters across matcher, scanner and SDK.
+- The isolated `[laya]` extra pins SDK 0.3.5 and retains NOVA's Transformers floor.
+- `nova-sys1 prepare-laya` explicitly downloads one revision-pinned checkpoint,
+  prepares its tokenizer and writes a standalone checksummed snapshot.
+- Scans require complete local assets. One model is reused per detector with
+  serialized loading/inference; CPU is default and CUDA must be explicit.
+- Token-exact preflight prevents the SDK from truncating questions, criteria or
+  state. Special mask-token text is rejected rather than silently rewritten.
+- Four-decimal answer validation is separate from OpenRouter rounding tolerance.
+- Existing conditions, UNKNOWN semantics and protection behavior are reused.
+- Diagnostics preserve checkpoint, device, applied calibration and available usage.
+- In-process queue waits are bounded; active inference cannot be forcibly cancelled.
 
-2. **Explicit model lifecycle.** Configure the checkpoint, revision, device and
-   calibration profile independently of rule syntax. Provision a complete pinned
-   local snapshot, including tokenizer and encoder assets, before scanning.
-   Do not implicitly download weights on the first protected action. Start with
-   one preloaded checkpoint and serialized inference. No automatic model switch
-   or remote fallback. If device fallback is permitted, expose the actual device;
-   otherwise reject it. Optional routing comes later and records the selected
-   checkpoint and route reason.
-
-3. **Reject truncation before inference.** Preflight every compiled question using
-   the exact pinned tokenizer and sequence layout. Reject any loss of instructions,
-   option descriptions or state, including the full NOVA context envelope. A byte
-   limit alone is insufficient. Return a typed `input_too_long` diagnostic, not a
-   prediction from truncated content. Do not silently summarize or discard history.
-
-4. **Provider-specific validation.** Make numeric precision an explicit validation
-   parameter: OpenRouter currently has a two-decimal rounding allowance, whereas
-   Laya returns four decimals. Do not inherit the looser allowance accidentally.
-   Validate requested IDs, primitive types, finite values, category membership,
-   probability normalization, score range and legend consistency. Extra provider
-   confidence on Noul does not introduce a Noul `min_confidence` setting.
-   Provider action-head outputs must never bypass NOVA's authored condition.
-
-5. **Confidence and calibration.** Preserve the reported confidence separately
-   from class probabilities. Do not reuse Jev confidence thresholds without
-   validation on representative inputs. Record checkpoint and calibration-profile
-   versions, and evaluate the actual deployed temperature settings. Fit calibration
-   on data separate from final quality tests. Calibration on one distribution does
-   not guarantee correctness under distribution shift or prompt manipulation.
-
-6. **Execution limits and diagnostics.** Bound payload size, batch size and queued
-   work. Start with one inference at a time because model/device lifecycle is
-   mutable. A Python thread timeout cannot cancel a running Torch kernel; use an
-   isolated worker if a hard inference deadline is required. Distinguish load,
-   token-limit, resource, inference and confidence failures. Preserve actual
-   checkpoint/revision/device and available usage; do not invent request IDs,
-   dollar costs or provider reasoning. Default logs must omit raw context.
-
-These are proposed additions. `provider=laya`, checkpoint/device settings and a
-Laya installation extra are **not currently supported**. Existing configuration
-continues to select OpenRouter explicitly; the model ID stays `typesafe/jev-1.13`.
-
-## Acceptance gates
-
-- Offline adapter fixtures for mixed primitives, reordered/missing answers,
-  invalid numbers, confidence requirements and provider precision.
-- No inference for settled conditions; one batch for applicable questions;
-  sync, async, scanner and decorator paths agree.
-- Every token boundary rejects overflow without truncation, including long
-  questions, criteria, multilingual text and structured history.
-- Required failures remain UNKNOWN and cannot execute a protected action.
-  Concurrent scans cannot exchange state or diagnostics.
-- Legacy imports and scans work without Laya or its ML dependencies. Test the
-  supported Python versions and installation extras separately.
-- Opt-in local inference tests with a pinned snapshot and synthetic inputs;
-  default CI never downloads weights or calls a live provider.
-- A labelled comparison using identical NOVA states, questions and evaluation
-  splits. Include authorized sensitive actions, harmless deviations, quoted
-  attacks, missing context and the same action under different approved goals.
-- Report false positives, misses, abstentions, calibration, cold/warm latency,
-  batch size, truncation rejection rate, peak memory and serving cost on the
-  actual deployment hardware. Evaluate languages separately and exclude future
-  events from prevention tests.
-
-Recommend enabling Laya only for workloads that pass these gates. The benefit to
-test is local, controllable inference; the DSL and enforcement remain NOVA's.
+No automatic routing, provider fallback, implicit downloads, fine-tuning,
+calibration fitting or Apple GPU support is included. CPU validation does not
+establish CUDA compatibility. See the guide for the offline suite, opt-in local
+smoke tests and labelled provider-comparison harness.

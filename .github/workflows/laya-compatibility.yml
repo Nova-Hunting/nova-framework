@@ -1,0 +1,29 @@
+name: Optional Laya SDK compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  laya:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install CPU runtime and optional extra
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[laya,test]"
+      - name: Offline SDK and sequence compatibility (no weights)
+        env:
+          HF_HUB_OFFLINE: "1"
+        run: python -m pytest tests/test_laya.py tests/test_laya_models.py tests/test_laya_runtime.py -q

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, fields
 import math
 import os
+import re
 
 
 @dataclass(frozen=True)
@@ -16,20 +17,28 @@ class Sys1Config:
     max_concurrency: int = 4
     max_request_bytes: int = 131072
     max_response_bytes: int = 1048576
+    device: str = "cpu"
+    queue_timeout_seconds: float = 15
+    max_batch_questions: int = 32
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
             raise ValueError("Sys1 enabled must be boolean")
-        if self.provider != "openrouter":
-            raise ValueError("Sys1 provider must be openrouter")
+        if self.provider not in ("openrouter", "laya"):
+            raise ValueError("Sys1 provider must be openrouter or laya")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("Sys1 model must be nonempty")
-        for name in ("connect_timeout_seconds", "timeout_seconds"):
+        if not isinstance(self.device, str) or not re.fullmatch(r"cpu|cuda(?::[0-9]+)?", self.device):
+            raise ValueError("Sys1 device must be cpu, cuda or cuda:N")
+        if self.provider == "laya" and self.model == "typesafe/jev-1.13":
+            raise ValueError("Laya requires a prepared local model path in sys1 model")
+        for name in ("connect_timeout_seconds", "timeout_seconds", "queue_timeout_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 < value <= 120:
                 raise ValueError(f"Sys1 {name} must be within (0, 120]")
         for name, low, high in (("retries", 0, 2), ("max_concurrency", 1, 32),
-                                ("max_request_bytes", 1, 10485760), ("max_response_bytes", 1, 10485760)):
+                                ("max_request_bytes", 1, 10485760), ("max_response_bytes", 1, 10485760),
+                                ("max_batch_questions", 1, 256)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"Sys1 {name} must be an integer within [{low}, {high}]")

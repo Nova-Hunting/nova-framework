@@ -27,6 +27,9 @@ semantic_requirements = [
     "transformers~=5.10.0; python_version >= '3.10'",
 ]
 
+# Deliberately separate from all/dev: local decision inference is explicitly opt-in.
+laya_requirements = ["laya==0.3.5", "transformers~=5.10.0"]
+
 test_requirements = [
     "pytest~=9.0.3",
     "pytest-asyncio~=1.3.0",
@@ -78,6 +81,7 @@ setup(
         "docs": docs_requirements,
         "lint": lint_requirements,
         "semantic": semantic_requirements,
+        "laya": laya_requirements,
         "security": security_requirements,
         "release": release_requirements,
         "all": semantic_requirements,
@@ -87,6 +91,7 @@ setup(
     entry_points={
         'console_scripts': [
             'novarun=nova.novarun:main',
+            'nova-sys1=nova.evaluators.sys1.models:main',
         ],
     },
     classifiers=[

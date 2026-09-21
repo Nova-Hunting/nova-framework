@@ -87,9 +87,9 @@ class NovaMatcher:
         self.sys1_evaluator = sys1_evaluator
         if rule and rule.sys1:
             from nova.evaluators.sys1.config import Sys1Config
-            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
             self.sys1_config = Sys1Config.resolve(sys1_config)
-            self.sys1_evaluator = sys1_evaluator or OpenRouterSys1Evaluator(self.sys1_config)
+            self.sys1_evaluator = sys1_evaluator if sys1_evaluator is not None else create_sys1_evaluator(self.sys1_config)
         
         # Always initialize keyword evaluator since it's lightweight
         self.keyword_evaluator = keyword_evaluator or DefaultKeywordEvaluator()
@@ -169,9 +169,9 @@ class NovaMatcher:
         self.rule = rule
         if rule and rule.sys1 and self.sys1_config is None:
             from nova.evaluators.sys1.config import Sys1Config
-            from nova.evaluators.sys1.openrouter import OpenRouterSys1Evaluator
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
             self.sys1_config = Sys1Config.resolve(self._sys1_options)
-            self.sys1_evaluator = self.sys1_evaluator or OpenRouterSys1Evaluator(self.sys1_config)
+            self.sys1_evaluator = self.sys1_evaluator if self.sys1_evaluator is not None else create_sys1_evaluator(self.sys1_config)
         self._precompile_patterns()
         # Update cached condition analysis for new rule
         if rule:

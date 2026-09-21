@@ -79,6 +79,12 @@ def main() -> None:
                 entry.name == "novarun" and entry.value == "nova.novarun:main"
                 for entry in console_scripts
             ), "novarun console script metadata is missing"
+            assert any(entry.name == "nova-sys1" and entry.value == "nova.evaluators.sys1.models:main"
+                       for entry in console_scripts), "nova-sys1 setup command is missing"
+            from nova.evaluators.sys1.factory import create_sys1_evaluator
+            local = create_sys1_evaluator({"provider": "laya", "model": "/missing"})
+            assert local._agent is None
+            assert not any(name in sys.modules for name in ("laya", "torch", "transformers"))
 
             package_requires = metadata.requires("nova-hunting") or []
             runtime_requires = [

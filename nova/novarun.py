@@ -534,6 +534,10 @@ def run_sys1_cli(args, parser, blocks, prompts):
         options["enabled"] = args.sys1_enabled
     if args.sys1_model is not None:
         options["model"] = args.sys1_model
+    if args.sys1_provider is not None:
+        options["provider"] = args.sys1_provider
+    if args.sys1_device is not None:
+        options["device"] = args.sys1_device
     try:
         config = Sys1Config.resolve(options)
         rules = [NovaParser().parse(block) for block in (blocks[:1] if args.single else blocks)]
@@ -615,10 +619,12 @@ def main():
     
     sys1_group = parser.add_mutually_exclusive_group()
     sys1_group.add_argument('--sys1', dest='sys1_enabled', action='store_true', default=None,
-                           help='Enable remote Sys1 decisions through OpenRouter')
+                           help='Enable Sys1 decisions using the selected provider')
     sys1_group.add_argument('--skip-sys1', dest='sys1_enabled', action='store_false',
                            help='Disable Sys1; unresolved required checks are errors')
-    parser.add_argument('--sys1-model', help='OpenRouter Decisions model (independent of --model)')
+    parser.add_argument('--sys1-provider', choices=('openrouter', 'laya'), help='Sys1 provider (default: openrouter)')
+    parser.add_argument('--sys1-model', help='OpenRouter model ID or prepared local Laya directory')
+    parser.add_argument('--sys1-device', help='Laya device: cpu (default), cuda or cuda:N')
     parser.add_argument('--sys1-state', metavar='FILE', help='JSON context for Sys1; paired with each prompt')
     parser.add_argument('--json', action='store_true', help='Emit Sys1 results as JSON Lines instead of a readable summary')
     args = parser.parse_args()
