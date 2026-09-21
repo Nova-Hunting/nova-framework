@@ -7,7 +7,7 @@ colorama~=0.4.6
 
 # Optional semantic model stack (requires Python 3.10+)
 sentence-transformers~=5.5.0; python_version >= "3.10"
-transformers~=5.8.1; python_version >= "3.10"
+transformers~=5.10.0; python_version >= "3.10"
 
 # Testing
 pytest~=9.0.3
@@ -26,5 +26,6 @@ build~=1.2.2
 twine~=6.2.0
 
 # Documentation (optional, for building docs locally)
-mkdocs~=1.5.3
-mkdocs-material~=9.5.9
+mkdocs~=1.6.1
+mkdocs-material~=9.7.7
+pymdown-extensions~=11.0

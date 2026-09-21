@@ -1,4 +1,10 @@
-# Nova Hunting v0.3.0 Release Notes
+# Nova Hunting v0.3.1 Release Notes
+
+## Release corrections
+- Raised the optional semantic dependency to `transformers~=5.10.0` to include the fix for CVE-2026-9856.
+- Includes the updated documentation dependencies: `mkdocs~=1.6.1`, `mkdocs-material~=9.7.7`, and `pymdown-extensions~=11.0`.
+- Included the SDK guide in source and wheel distributions and added artifact verification for it. This fixes the missing-file failure when running tests from the source archive.
+- No changes to the detection engine or policy behavior.
 
 ## Highlights
 - Promoted NOVA from beta to production/stable status, reflecting the hardened fail-closed engine, full CI/security gates, and stability guarantees established over the 0.2.x series.
@@ -11,7 +17,7 @@
 ## Compatibility
 - No breaking changes. The public API, SDK behavior, CLI commands, `.nov` rule syntax, configuration format, and detection semantics are unchanged from v0.2.1.
 - All supported LLM providers remain compatible: OpenAI, Anthropic, Azure OpenAI, Ollama, Groq, and OpenRouter.
-- The public package version is `0.3.0`; `nova.__version__` and package metadata share a single source of truth in `nova/_version.py`.
+- The public package version is `0.3.1`; `nova.__version__` and package metadata share a single source of truth in `nova/_version.py`.
 - Supported Python versions are 3.10 and newer.
 - Contributors: the local gates now lint `nova tests scripts` (the root `test.py` script no longer exists).
 - Review `SECURITY.md` before reporting vulnerabilities or publishing downstream deployments.

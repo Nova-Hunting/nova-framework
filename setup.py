@@ -24,7 +24,7 @@ requirements = [
 semantic_requirements = [
     # Current safe semantic stack requires Python 3.10+, matching NOVA's runtime floor.
     "sentence-transformers~=5.5.0; python_version >= '3.10'",
-    "transformers~=5.8.1; python_version >= '3.10'",
+    "transformers~=5.10.0; python_version >= '3.10'",
 ]
 
 test_requirements = [
@@ -35,8 +35,11 @@ test_requirements = [
 ]
 
 docs_requirements = [
-    "mkdocs~=1.5.3",
-    "mkdocs-material~=9.5.9",
+    "mkdocs~=1.6.1",
+    "mkdocs-material~=9.7.7",
+    # Explicit floor: mkdocs-material alone allows pymdown-extensions >=10.2,
+    # which includes versions vulnerable to CVE-2026-61632 (fixed in 11.0.0).
+    "pymdown-extensions~=11.0",
 ]
 
 lint_requirements = [

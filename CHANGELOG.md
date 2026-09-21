@@ -1,6 +1,19 @@
 # NOVA Framework Changelog
 
+## [0.3.1] - 2026-09-21
+
+### Security
+- Raised the optional semantic dependency to `transformers~=5.10.0` to exclude versions affected by CVE-2026-9856.
+- Includes the documentation dependency updates to `mkdocs~=1.6.1`, `mkdocs-material~=9.7.7`, and `pymdown-extensions~=11.0`, excluding versions affected by CVE-2026-73295 and CVE-2026-61632.
+
+### Fixed
+- Included `nova/sdk/README.md` in source and wheel distributions so the SDK guide ships with the package and the source distribution's metadata tests can run.
+- Added the SDK guide to required artifact contents to catch future packaging omissions.
+
 ## [0.3.0] - 2026-07-07
+
+### Security
+- Updated the `docs` extra to `mkdocs~=1.6.1` and `mkdocs-material~=9.7.7`, and added an explicit `pymdown-extensions~=11.0` floor so documentation builds cannot resolve versions vulnerable to CVE-2026-61632. Runtime dependencies were never affected.
 
 ### Added
 - Added optional OpenRouter app attribution headers through `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` environment variables, or the `http_referer` and `app_title` `OpenRouterEvaluator` constructor arguments.
