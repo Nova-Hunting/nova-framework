@@ -523,6 +523,7 @@ def print_prompts_summary(results: List[Dict[str, Any]], prompts: List[str]):
 def run_jev_cli(args, parser, blocks, prompts):
     """Use the shared scanner for Jev rules, preserving legacy CLI output elsewhere."""
     import json
+    import time
     from nova.core.scanner import NovaScanner
     from nova.core.jev import NovaEvaluationError
     from nova.evaluators.jev.config import JevConfig
@@ -549,6 +550,7 @@ def run_jev_cli(args, parser, blocks, prompts):
         parser.error(str(error))
     incomplete = False
     for index, prompt in enumerate(prompts):
+        started = time.perf_counter()
         try:
             details = scanner.scan_with_details(prompt, jev_state=context)
         except NovaEvaluationError as error:
@@ -556,9 +558,26 @@ def run_jev_cli(args, parser, blocks, prompts):
             incomplete = True
             print(f"Incomplete evaluation: {', '.join(sorted(set(error.causes)))}")
         # No prompt/context or credentials in default output. Evidence remains inspectable.
-        print(json.dumps({"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
-                          "matches": details.get("matches", []), "jev_results": details.get("jev_results", {})},
-                         ensure_ascii=False, indent=2))
+        output = {"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
+                  "matches": details.get("matches", []), "jev_results": details.get("jev_results", {})}
+        if args.verbose:
+            output["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
+            output["jev_config"] = {"enabled": config.enabled, "provider": config.provider, "model": config.model}
+            output["rule_details"] = {}
+            for name, result in details.get("detailed_results", {}).items():
+                debug = result.get("debug", {})
+                output["rule_details"][name] = {
+                    "matched": result["matched"],
+                    "condition": debug.get("condition"),
+                    "condition_result": debug.get("condition_result"),
+                    "matching_keywords": result.get("matching_keywords", {}),
+                    "matching_semantics": result.get("matching_semantics", {}),
+                    "matching_llm": result.get("matching_llm", {}),
+                    "matching_jev": result.get("matching_jev", {}),
+                    "evaluation_warnings": debug.get("evaluation_warnings", []),
+                    "jev_batches": result.get("jev_batches", []),
+                }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
     if incomplete:
         sys.exit(1)
 

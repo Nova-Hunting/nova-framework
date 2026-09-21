@@ -169,6 +169,12 @@ Jev CLI output includes typed evidence, match summaries, and completion status,
 without raw text/context. Required runtime failures exit 1; invalid Jev options
 or declarations exit 2. `--jev` and `--skip-jev` are mutually exclusive.
 
+Add `--verbose` (or `-v`) to include elapsed time, effective Jev provider/model,
+each rule's condition and outcome, matched predicates, evaluation warnings, and
+batch metadata such as request IDs, HTTP attempt counts and reported usage/cost.
+The extra diagnostics also appear for incomplete evaluations. Verbose output does
+not include the raw prompt, supplied context or credentials.
+
 ```ini
 [jev]
 enabled = false

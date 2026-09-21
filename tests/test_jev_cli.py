@@ -80,3 +80,43 @@ def test_config_precedence_and_separation(monkeypatch, tmp_path):
 def test_invalid_config(options):
     with pytest.raises(ValueError):
         JevConfig.resolve(options)
+
+
+@pytest.mark.parametrize("verbose,confidence", [(False, .8), (True, .8), (True, .4)])
+def test_verbose_evidence_and_incomplete_diagnostics(monkeypatch, tmp_path, capsys, verbose, confidence):
+    fixture = FixtureEvaluator(confidence=confidence)
+
+    def evaluate(self, patterns, state):
+        batch = fixture.evaluate_many(patterns, state)
+        batch.metadata.update(id="fixture-request", request_count=1, usage={"cost": .001})
+        return batch
+
+    monkeypatch.setattr(OpenRouterJevEvaluator, "evaluate_many", evaluate)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "private-api-key-marker")
+    context = tmp_path / "context.json"
+    context.write_text('{"context": "private-context-marker"}')
+    args = ["--prompt", "private-prompt-marker", "--jev", "--jev-state", str(context)]
+    if verbose:
+        args.append("--verbose")
+    if confidence < .6:
+        with pytest.raises(SystemExit) as caught:
+            invoke(monkeypatch, tmp_path, args, source("jev.$operation"))
+        assert caught.value.code == 1
+    else:
+        invoke(monkeypatch, tmp_path, args, source("jev.$operation"))
+    raw = capsys.readouterr().out
+    assert all(marker not in raw for marker in ("private-api-key-marker", "private-context-marker", "private-prompt-marker"))
+    output = json.loads(raw[raw.index("{"):])
+    if not verbose:
+        assert "rule_details" not in output and "jev_config" not in output
+        return
+    rule = output["rule_details"]["Risk"]
+    assert output["elapsed_ms"] >= 0
+    assert output["jev_config"]["provider"] == "openrouter"
+    assert rule["condition"] == "jev.$operation"
+    assert rule["jev_batches"][0]["usage"]["cost"] == .001
+    assert rule["jev_batches"][0]["id"] == "fixture-request"
+    assert rule["condition_result"] == ("unknown" if confidence < .6 else "true")
+    if confidence < .6:
+        assert not output["evaluation_complete"]
+        assert "insufficient_confidence" in rule["evaluation_warnings"][0]
