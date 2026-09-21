@@ -8,7 +8,7 @@ Description: Rule definitions and pattern classes for pattern matching
 """
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 
 @dataclass
@@ -20,10 +20,15 @@ class KeywordPattern:
         pattern: The string or regex pattern to match
         is_regex: Whether the pattern should be treated as a regular expression
         case_sensitive: Whether the match should be case-sensitive
+        fuzzy_threshold: Optional similarity threshold (0.0-1.0). When set, the
+            pattern matches if the best-aligned substring of the text has a
+            normalized Indel (Levenshtein-family) similarity >= threshold.
+            Not valid for regex patterns.
     """
     pattern: str
     is_regex: bool = False
     case_sensitive: bool = False  # Default to case-insensitive
+    fuzzy_threshold: Optional[float] = None
 
 
 @dataclass

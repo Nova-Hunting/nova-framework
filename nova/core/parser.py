@@ -335,7 +335,24 @@ class NovaParser:
             self.variable_names['keywords'].add(key)
             
             value = value.strip()
-            
+
+            # Optional fuzzy threshold modifier: $var = "pattern" (0.85)
+            fuzzy_threshold = None
+            fuzzy_match = re.match(r'^(.*?)\s*\(\s*([0-9]*\.?[0-9]+)\s*\)\s*$', value)
+            if fuzzy_match and not value.startswith('/'):
+                value = fuzzy_match.group(1).strip()
+                try:
+                    fuzzy_threshold = float(fuzzy_match.group(2))
+                except ValueError as e:
+                    raise NovaParserError(
+                        f"Invalid fuzzy threshold at line {line_num}: '{fuzzy_match.group(2)}'. {str(e)}")
+                if not 0.0 < fuzzy_threshold <= 1.0:
+                    raise NovaParserError(
+                        f"Invalid fuzzy threshold at line {line_num}: {fuzzy_threshold}. Must be in (0.0, 1.0]")
+            elif fuzzy_match and value.startswith('/'):
+                raise NovaParserError(
+                    f"Fuzzy threshold at line {line_num} is not supported for regex patterns")
+
             is_regex = value.startswith('/') and value.rstrip('i').endswith('/')
             case_sensitive = False  # Default to case-insensitive for all patterns
             
@@ -375,7 +392,12 @@ class NovaParser:
                     value = parts[0].strip()
                     case_sensitive = True
                     
-            result[key] = KeywordPattern(pattern=value, is_regex=is_regex, case_sensitive=case_sensitive)
+            if fuzzy_threshold is not None and not value:
+                raise NovaParserError(
+                    f"Fuzzy keyword pattern at line {line_num} must not be empty")
+
+            result[key] = KeywordPattern(pattern=value, is_regex=is_regex, case_sensitive=case_sensitive,
+                                         fuzzy_threshold=fuzzy_threshold)
             
         return result
 

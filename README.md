@@ -19,6 +19,7 @@ NOVA is an open-source prompt pattern matching system combining keyword detectio
 ## Features
 
 - **Keyword Detection:** Flag suspicious prompts using predefined keywords or regex.
+- **Fuzzy Keywords:** Catch typos, leetspeak, and padding with a normalized Indel (Levenshtein-family) similarity threshold, e.g. `"ignore previous instructions" (0.85)`. Deterministic, offline, no model download. Install with `pip install "nova-hunting[fuzzy]"` (falls back to `difflib` otherwise).
 - **Semantic Similarity:** Identify pattern variations using configurable thresholds.
 - **LLM Matching:** Create matching rules using natural language evaluated by OpenAI, Anthropic, Azure OpenAI, Ollama, Groq, or OpenRouter.
 
@@ -36,6 +37,7 @@ rule RuleName
     keywords:
         $keyword1 = "exact text"
         $keyword2 = /regex pattern/i
+        $keyword3 = "fuzzy text" (0.85)
 
     semantics:
         $semantic1 = "semantic pattern" (0.6)

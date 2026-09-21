@@ -27,6 +27,10 @@ semantic_requirements = [
     "transformers~=5.10.0; python_version >= '3.10'",
 ]
 
+fuzzy_requirements = [
+    "rapidfuzz~=3.10",
+]
+
 test_requirements = [
     "pytest~=9.0.3",
     "pytest-asyncio~=1.3.0",
@@ -78,10 +82,11 @@ setup(
         "docs": docs_requirements,
         "lint": lint_requirements,
         "semantic": semantic_requirements,
+        "fuzzy": fuzzy_requirements,
         "security": security_requirements,
         "release": release_requirements,
-        "all": semantic_requirements,
-        "dev": test_requirements + docs_requirements + lint_requirements + semantic_requirements + security_requirements + release_requirements,
+        "all": semantic_requirements + fuzzy_requirements,
+        "dev": test_requirements + docs_requirements + lint_requirements + semantic_requirements + fuzzy_requirements + security_requirements + release_requirements,
     },
     include_package_data=True,
     entry_points={
