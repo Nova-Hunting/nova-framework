@@ -235,6 +235,9 @@ cross-rule aggregation. Timeouts are transport limits, not service guarantees.
 
 ## Examples and validation
 
+For practical OpenRouter examples, start with the [Jev quickstart](sys1-openrouter-quickstart.md)
+and [Jev use cases and complete example rules](sys1-jev-use-cases.md).
+
 After installing the checkout (`python -m pip install -e .`):
 
 ```sh
