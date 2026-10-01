@@ -14,7 +14,7 @@ import requests
 
 from nova.evaluators.base import LLMEvaluator
 from nova.evaluators.llm._shared import _select_model, logger
-from nova.evaluators.llm._openai import OpenAIEvaluator, OpenRouterEvaluator, AzureOpenAIEvaluator
+from nova.evaluators.llm._openai import OpenAIEvaluator, OpenRouterEvaluator, VercelEvaluator, OrcaRouterEvaluator, AzureOpenAIEvaluator
 from nova.evaluators.llm._anthropic import AnthropicEvaluator
 from nova.evaluators.llm._groq import GroqEvaluator
 from nova.evaluators.llm._ollama import OllamaEvaluator
@@ -26,7 +26,7 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
     If the requested evaluator can't be created, raises an exception.
 
     Args:
-        llm_type: Type of LLM evaluator ('openai', 'anthropic', 'azure', 'ollama', 'groq', or 'openrouter')
+        llm_type: Type of LLM evaluator ('openai', 'anthropic', 'azure', 'ollama', 'groq', 'openrouter', 'vercel', or 'orcarouter')
         model: Optional model name to use
         verbose: Whether to print verbose information
 
@@ -108,6 +108,26 @@ def get_validated_evaluator(llm_type: str, model: Optional[str] = None, verbose:
         else:
             raise ValueError("OPENROUTER_API_KEY not set in environment variables. Cannot use OpenRouter evaluator.")
 
+    elif llm_type.lower() == 'vercel':
+        api_key = os.environ.get("AI_GATEWAY_API_KEY")
+        if api_key:
+            selected_model = _select_model("vercel", model, "openai/gpt-4o-mini")
+            if verbose:
+                logger.info(f"✓ Using Vercel AI Gateway evaluator with model: {selected_model}")
+            return VercelEvaluator(api_key=api_key, model=selected_model)
+        else:
+            raise ValueError("AI_GATEWAY_API_KEY not set in environment variables. Cannot use Vercel AI Gateway evaluator.")
+
+    elif llm_type.lower() == 'orcarouter':
+        api_key = os.environ.get("ORCAROUTER_API_KEY")
+        if api_key:
+            selected_model = _select_model("orcarouter", model, "orcarouter/auto")
+            if verbose:
+                logger.info(f"✓ Using OrcaRouter evaluator with model: {selected_model}")
+            return OrcaRouterEvaluator(api_key=api_key, model=selected_model)
+        else:
+            raise ValueError("ORCAROUTER_API_KEY not set in environment variables. Cannot use OrcaRouter evaluator.")
+
     else:
         # Invalid LLM type
-        raise ValueError(f"Unsupported LLM type: {llm_type}. Supported types are: openai, anthropic, azure, ollama, groq, openrouter")
+        raise ValueError(f"Unsupported LLM type: {llm_type}. Supported types are: openai, anthropic, azure, ollama, groq, openrouter, vercel, orcarouter")

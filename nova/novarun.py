@@ -34,7 +34,7 @@ except ImportError:
 # Initialize colorama
 colorama.init(autoreset=True)
 
-SUPPORTED_LLM_PROVIDERS = ['openai', 'anthropic', 'azure', 'ollama', 'groq', 'openrouter']
+SUPPORTED_LLM_PROVIDERS = ['openai', 'anthropic', 'azure', 'ollama', 'groq', 'openrouter', 'vercel', 'orcarouter']
 
 CONFIG_API_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
@@ -43,6 +43,8 @@ CONFIG_API_KEY_ENV = {
     "azure_openai": "AZURE_OPENAI_API_KEY",
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "vercel": "AI_GATEWAY_API_KEY",
+    "orcarouter": "ORCAROUTER_API_KEY",
 }
 
 
@@ -221,7 +223,7 @@ def process_prompt(rule_text: str, prompt: str, verbose: bool = False,
         rule_text: Nova rule definition
         prompt: Prompt to check
         verbose: Whether to enable verbose output
-        llm_type: Type of LLM evaluator to use ('openai', 'anthropic', 'azure', 'ollama', 'groq', or 'openrouter')
+        llm_type: Type of LLM evaluator to use ('openai', 'anthropic', 'azure', 'ollama', 'groq', 'openrouter', 'vercel', or 'orcarouter')
         model: Optional model name to use
         llm_evaluator: Optional pre-existing LLM evaluator to reuse
         

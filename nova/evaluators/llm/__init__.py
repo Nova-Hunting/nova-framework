@@ -33,6 +33,8 @@ from nova.evaluators.llm._shared import _get_shared_session as _get_shared_sessi
 from nova.evaluators.llm._openai import (
     OpenAIEvaluator,
     OpenRouterEvaluator,
+    VercelEvaluator,
+    OrcaRouterEvaluator,
     AzureOpenAIEvaluator,
 )
 from nova.evaluators.llm._anthropic import AnthropicEvaluator
@@ -49,6 +51,8 @@ __all__ = [
     'LLMEvaluator',
     'OpenAIEvaluator',
     'OpenRouterEvaluator',
+    'VercelEvaluator',
+    'OrcaRouterEvaluator',
     'AzureOpenAIEvaluator',
     'AnthropicEvaluator',
     'GroqEvaluator',

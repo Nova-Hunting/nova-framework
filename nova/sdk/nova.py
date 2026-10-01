@@ -87,7 +87,7 @@ class Nova:
             rules: Pre-loaded NovaRule objects
             policy: Policy configuration (dict or NovaPolicy)
             default_action: Default action when no policy matches
-            llm_provider: LLM provider: "openai", "anthropic", "groq", "openrouter", "azure", "ollama"
+            llm_provider: LLM provider: "openai", "anthropic", "groq", "openrouter", "vercel", "orcarouter", "azure", "ollama"
             llm_model: Specific model override (optional)
             redaction_marker: Text to use for redactions
             auto_redact: Whether to automatically redact on REDACT action

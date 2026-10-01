@@ -236,7 +236,7 @@ nova = Nova(
     default_action=Action.FLAG,          # Default when no pattern matches
 
     # LLM Provider (for rules with LLM patterns)
-    llm_provider="openai",               # openai, anthropic, groq, openrouter, azure, ollama
+    llm_provider="openai",               # openai, anthropic, groq, openrouter, vercel, orcarouter, azure, ollama
     llm_model="gpt-4o-mini",             # Specific model (optional)
 
     # Redaction
@@ -263,6 +263,32 @@ nova = Nova(
     llm_model="openai/gpt-5.2",
 )
 ```
+
+Vercel AI Gateway uses the same SDK options:
+
+```python
+# Set AI_GATEWAY_API_KEY in your environment before creating Nova.
+nova = Nova(
+    rules_path="nova-rules/",
+    llm_provider="vercel",
+    llm_model="openai/gpt-4o-mini",
+)
+```
+
+The default model is `openai/gpt-4o-mini`. Set `AI_GATEWAY_LLM_MODEL` or `AI_GATEWAY_MODEL` to override it through the environment.
+
+OrcaRouter is also supported:
+
+```python
+# Set ORCAROUTER_API_KEY in your environment before creating Nova.
+nova = Nova(
+    rules_path="nova-rules/",
+    llm_provider="orcarouter",
+    llm_model="orcarouter/auto",
+)
+```
+
+The default model is `orcarouter/auto`. Set `ORCAROUTER_LLM_MODEL` or `ORCAROUTER_MODEL` to override it through the environment. Temperature is omitted for `orcarouter/` router models.
 
 When `llm_model` is omitted, Nova checks provider-specific model environment variables such as `OPENROUTER_LLM_MODEL` and `OPENROUTER_MODEL`, then falls back to `NOVA_LLM_MODEL` and the provider default.
 For OpenRouter app attribution, set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to include the optional `HTTP-Referer` and `X-OpenRouter-Title` request headers.

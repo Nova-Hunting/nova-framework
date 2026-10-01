@@ -126,12 +126,13 @@ class NovaConfig:
             self.config["llm"]["host"] = os.environ["OLLAMA_HOST"]
         
         # API keys
-        for provider in ["OPENAI", "ANTHROPIC", "AZURE_OPENAI", "GROQ", "OPENROUTER"]:
+        for provider in ["OPENAI", "ANTHROPIC", "AZURE_OPENAI", "GROQ", "OPENROUTER", "AI_GATEWAY", "ORCAROUTER"]:
             env_var = f"{provider}_API_KEY"
             if os.environ.get(env_var):
                 if "api_keys" not in self.config:
                     self.config["api_keys"] = {}
-                self.config["api_keys"][provider.lower()] = os.environ[env_var]
+                config_key = "vercel" if provider == "AI_GATEWAY" else provider.lower()
+                self.config["api_keys"][config_key] = os.environ[env_var]
         
         # Semantic model
         if os.environ.get("NOVA_SEMANTIC_MODEL"):

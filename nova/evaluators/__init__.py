@@ -21,11 +21,13 @@ from nova.evaluators.condition import evaluate_condition
 _DefaultSemanticEvaluator = None
 _OpenAIEvaluator = None
 _OpenRouterEvaluator = None
+_VercelEvaluator = None
+_OrcaRouterEvaluator = None
 
 
 def __getattr__(name):
     """Lazy loading of heavy evaluator classes."""
-    global _DefaultSemanticEvaluator, _OpenAIEvaluator, _OpenRouterEvaluator
+    global _DefaultSemanticEvaluator, _OpenAIEvaluator, _OpenRouterEvaluator, _VercelEvaluator, _OrcaRouterEvaluator
 
     if name == 'DefaultSemanticEvaluator':
         if _DefaultSemanticEvaluator is None:
@@ -45,6 +47,18 @@ def __getattr__(name):
             _OpenRouterEvaluator = _ORE
         return _OpenRouterEvaluator
 
+    if name == 'VercelEvaluator':
+        if _VercelEvaluator is None:
+            from nova.evaluators.llm import VercelEvaluator as _VE
+            _VercelEvaluator = _VE
+        return _VercelEvaluator
+
+    if name == 'OrcaRouterEvaluator':
+        if _OrcaRouterEvaluator is None:
+            from nova.evaluators.llm import OrcaRouterEvaluator as _ORE
+            _OrcaRouterEvaluator = _ORE
+        return _OrcaRouterEvaluator
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -57,5 +71,7 @@ __all__ = [
     'DefaultSemanticEvaluator',
     'OpenAIEvaluator',
     'OpenRouterEvaluator',
+    'VercelEvaluator',
+    'OrcaRouterEvaluator',
     'evaluate_condition',
 ]
