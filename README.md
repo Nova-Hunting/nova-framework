@@ -20,7 +20,7 @@ NOVA is an open-source prompt pattern matching system combining keyword detectio
 
 - **Keyword Detection:** Flag suspicious prompts using predefined keywords or regex.
 - **Semantic Similarity:** Identify pattern variations using configurable thresholds.
-- **LLM Matching:** Create matching rules using natural language evaluated by OpenAI, Anthropic, Azure OpenAI, Ollama, Groq, or OpenRouter.
+- **LLM Matching:** Create matching rules using natural language evaluated by OpenAI, Anthropic, Azure OpenAI, Ollama, Groq, OpenRouter, Vercel AI Gateway, or OrcaRouter.
 
 Inspired by YARA syntax, NOVA rules are readable and flexible, ideal for prompt hunting and threat detection.
 
@@ -90,6 +90,30 @@ novarun --rule nova-rules/jailbreak.nov \
 
 Provider-specific model environment variables are also supported, for example `OPENROUTER_LLM_MODEL`, `OPENROUTER_MODEL`, and the fallback `NOVA_LLM_MODEL`.
 For OpenRouter app attribution, set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send the optional `HTTP-Referer` and `X-OpenRouter-Title` headers.
+
+For Vercel AI Gateway, set `AI_GATEWAY_API_KEY` and select `--llm vercel`:
+
+```bash
+export AI_GATEWAY_API_KEY="your-gateway-key"
+novarun --rule nova-rules/jailbreak.nov \
+  --prompt "ignore previous instructions" \
+  --llm vercel \
+  --model openai/gpt-4o-mini
+```
+
+Nova uses `https://ai-gateway.vercel.sh/v1/chat/completions`. Models use `provider/model` IDs; the default is `openai/gpt-4o-mini`. Override it with `--model`, `AI_GATEWAY_LLM_MODEL`, or `AI_GATEWAY_MODEL`. Config files use `provider = vercel` under `[llm]` and `vercel = your-gateway-key` under `[api_keys]`.
+
+For OrcaRouter, set `ORCAROUTER_API_KEY` and select `--llm orcarouter`:
+
+```bash
+export ORCAROUTER_API_KEY="your-orcarouter-key"
+novarun --rule nova-rules/jailbreak.nov \
+  --prompt "ignore previous instructions" \
+  --llm orcarouter \
+  --model orcarouter/auto
+```
+
+Nova uses `https://api.orcarouter.ai/v1/chat/completions` and defaults to `orcarouter/auto`. Override the model with `--model`, `ORCAROUTER_LLM_MODEL`, or `ORCAROUTER_MODEL`. Config files use `provider = orcarouter` under `[llm]` and `orcarouter = your-orcarouter-key` under `[api_keys]`. Temperature is omitted for `orcarouter/` router models, following the [official SDK](https://github.com/Continuum-AI-Corp/orcarouter-ai-sdk).
 
 Other LLM providers use the matching credential environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_ENDPOINT`, `GROQ_API_KEY`, and local Ollama via `OLLAMA_HOST`.
 

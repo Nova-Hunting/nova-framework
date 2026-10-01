@@ -38,7 +38,7 @@ class NovaScanner:
             rules: List of NovaRule objects to check against (optional)
             llm_type: Optional LLM provider for rules that require LLM evaluation.
                       Supported values match novarun: openai, anthropic, azure,
-                      ollama, groq, and openrouter.
+                      ollama, groq, openrouter, vercel, and orcarouter.
             llm_model: Optional model/deployment override for the selected provider.
             llm_evaluator: Optional pre-built evaluator to reuse for all LLM rules.
         """

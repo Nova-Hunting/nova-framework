@@ -95,11 +95,17 @@ export AZURE_OPENAI_API_KEY="..."
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
 export GROQ_API_KEY="gsk_..."
 export OPENROUTER_API_KEY="sk-or-..."
+export AI_GATEWAY_API_KEY="your-gateway-key"
+export ORCAROUTER_API_KEY="your-orcarouter-key"
 ```
 
 For local Ollama, set `OLLAMA_HOST` if it is not available at `http://localhost:11434`.
 
-Provider-specific model overrides are supported with `OPENAI_LLM_MODEL`, `ANTHROPIC_LLM_MODEL`, `AZURE_OPENAI_LLM_MODEL`, `GROQ_LLM_MODEL`, `OLLAMA_LLM_MODEL`, and `OPENROUTER_LLM_MODEL`. Provider aliases such as `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_MODEL`, `GROQ_MODEL`, `OLLAMA_MODEL`, and `OPENROUTER_MODEL` are also accepted, with `NOVA_LLM_MODEL` as a shared fallback.
+Provider-specific model overrides are supported with `OPENAI_LLM_MODEL`, `ANTHROPIC_LLM_MODEL`, `AZURE_OPENAI_LLM_MODEL`, `GROQ_LLM_MODEL`, `OLLAMA_LLM_MODEL`, `OPENROUTER_LLM_MODEL`, `AI_GATEWAY_LLM_MODEL`, and `ORCAROUTER_LLM_MODEL`. Provider aliases such as `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_MODEL`, `GROQ_MODEL`, `OLLAMA_MODEL`, `OPENROUTER_MODEL`, `AI_GATEWAY_MODEL`, and `ORCAROUTER_MODEL` are also accepted, with `NOVA_LLM_MODEL` as a shared fallback.
+
+Select Vercel AI Gateway with `--llm vercel` and a model ID such as `--model openai/gpt-4o-mini` (the default). Nova sends requests to `https://ai-gateway.vercel.sh/v1/chat/completions`. In config files, use `provider = vercel` under `[llm]` and `vercel = your-gateway-key` under `[api_keys]`.
+
+Select OrcaRouter with `--llm orcarouter` and optionally `--model orcarouter/auto` (the default). Nova sends requests to `https://api.orcarouter.ai/v1/chat/completions`. In config files, use `provider = orcarouter` under `[llm]` and `orcarouter = your-orcarouter-key` under `[api_keys]`.
 
 OpenRouter app attribution headers are optional. Set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` to send `HTTP-Referer` and `X-OpenRouter-Title` with OpenRouter requests.
 
@@ -150,7 +156,7 @@ python scripts/smoke_wheel.py
 The semantic ML stack is an optional extra. Install it with `pip install "nova-hunting[semantic]"` (requires Python 3.10+). The first semantic scan downloads the embedding model, which needs network access.
 
 **`ValueError: OPENAI_API_KEY not set ...` (or the equivalent for another provider).**
-Rules with `llm:` patterns need credentials for the provider selected with `--llm`. Export the matching key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`) or pass a config file with `--config`. Nova intentionally does not fall back to another provider.
+Rules with `llm:` patterns need credentials for the provider selected with `--llm`. Export the matching key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY`, `ORCAROUTER_API_KEY`) or pass a config file with `--config`. Nova intentionally does not fall back to another provider.
 
 **`Could not connect to Ollama at http://localhost:11434`.**
 Start the Ollama service (`ollama serve`) or point `OLLAMA_HOST` at the correct host and port.

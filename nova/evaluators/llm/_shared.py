@@ -28,6 +28,8 @@ PROVIDER_MODEL_ENV = {
     "ollama": "OLLAMA_LLM_MODEL",
     "groq": "GROQ_LLM_MODEL",
     "openrouter": "OPENROUTER_LLM_MODEL",
+    "vercel": "AI_GATEWAY_LLM_MODEL",
+    "orcarouter": "ORCAROUTER_LLM_MODEL",
 }
 
 PROVIDER_MODEL_ENV_ALIASES = {
@@ -37,6 +39,8 @@ PROVIDER_MODEL_ENV_ALIASES = {
     "groq": ("GROQ_MODEL",),
     "ollama": ("OLLAMA_MODEL",),
     "openrouter": ("OPENROUTER_MODEL",),
+    "vercel": ("AI_GATEWAY_MODEL",),
+    "orcarouter": ("ORCAROUTER_MODEL",),
 }
 
 

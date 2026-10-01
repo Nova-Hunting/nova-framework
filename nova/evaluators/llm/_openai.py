@@ -4,7 +4,7 @@ Author: Thomas Roccia
 twitter: @fr0gger_
 License: MIT License
 Version: see nova._version
-Description: OpenAI-compatible LLM evaluators (OpenAI, OpenRouter, Azure OpenAI)
+Description: OpenAI-compatible LLM evaluators (OpenAI, OpenRouter, Vercel AI Gateway, OrcaRouter, Azure OpenAI)
 """
 
 import os
@@ -52,6 +52,9 @@ class OpenAIEvaluator(LLMEvaluator):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+    def _request_parameters(self, temperature: float) -> Dict[str, Any]:
+        return {"temperature": temperature}
 
     def evaluate(self, pattern: str, text: str) -> Union[bool, Tuple[bool, float]]:
         """
@@ -116,7 +119,7 @@ class OpenAIEvaluator(LLMEvaluator):
                         },
                         {"role": "user", "content": full_prompt}
                     ],
-                    "temperature": temperature,  # Use the provided temperature
+                    **self._request_parameters(temperature),
                     "response_format": {"type": "json_object"}
                 },
                 timeout=10  # Add timeout for network operations
@@ -207,6 +210,42 @@ class OpenRouterEvaluator(OpenAIEvaluator):
         if self.app_title:
             headers["X-OpenRouter-Title"] = self.app_title
         return headers
+
+
+class VercelEvaluator(OpenAIEvaluator):
+    """LLM evaluator using Vercel AI Gateway's OpenAI-compatible API."""
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "openai/gpt-4o-mini"):
+        self.api_key = api_key or os.environ.get("AI_GATEWAY_API_KEY")
+        self.model = model
+        self.base_url = "https://ai-gateway.vercel.sh/v1/chat/completions"
+        self.session = _get_shared_session()
+        self.evaluator_type = "vercel"
+        self.log_label = "Vercel AI Gateway"
+
+        if not self.api_key:
+            logger.warning("No API key provided for Vercel AI Gateway evaluator. Set AI_GATEWAY_API_KEY environment variable or pass api_key.")
+
+
+class OrcaRouterEvaluator(OpenAIEvaluator):
+    """LLM evaluator using OrcaRouter's OpenAI-compatible API."""
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "orcarouter/auto"):
+        self.api_key = api_key or os.environ.get("ORCAROUTER_API_KEY")
+        self.model = model
+        self.base_url = "https://api.orcarouter.ai/v1/chat/completions"
+        self.session = _get_shared_session()
+        self.evaluator_type = "orcarouter"
+        self.log_label = "OrcaRouter"
+
+        if not self.api_key:
+            logger.warning("No API key provided for OrcaRouter evaluator. Set ORCAROUTER_API_KEY environment variable or pass api_key.")
+
+    def _request_parameters(self, temperature: float) -> Dict[str, Any]:
+        # OrcaRouter's automatic routers reject temperature overrides.
+        if self.model.startswith("orcarouter/"):
+            return {}
+        return super()._request_parameters(temperature)
 
 
 class AzureOpenAIEvaluator(OpenAIEvaluator):
