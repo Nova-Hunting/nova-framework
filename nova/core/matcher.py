@@ -68,7 +68,7 @@ class NovaMatcher:
                  keyword_evaluator: Optional[DefaultKeywordEvaluator] = None,
                  semantic_evaluator: Optional[Any] = None,  # DefaultSemanticEvaluator might not be available
                  llm_evaluator: Optional[Any] = None,       # LLMEvaluator might not be available
-                 create_llm_evaluator: bool = True):
+                 create_llm_evaluator: bool = True, *, decision_config=None, decision_evaluator=None):
         """
         Initialize the matcher with a rule and optional custom evaluators.
         Only initializes evaluators when needed based on rule content.
@@ -82,6 +82,14 @@ class NovaMatcher:
                                   If False, and llm_evaluator is None, no LLM evaluations will be performed.
         """
         self.rule = rule
+        self._decision_options = decision_config
+        self.decision_config = None
+        self.decision_evaluator = decision_evaluator
+        if rule and rule.decision:
+            from nova.evaluators.decision.config import DecisionConfig
+            from nova.evaluators.decision.factory import create_decision_evaluator
+            self.decision_config = DecisionConfig.resolve(decision_config)
+            self.decision_evaluator = decision_evaluator if decision_evaluator is not None else create_decision_evaluator(self.decision_config)
         
         # Always initialize keyword evaluator since it's lightweight
         self.keyword_evaluator = keyword_evaluator or DefaultKeywordEvaluator()
@@ -97,7 +105,7 @@ class NovaMatcher:
         needs_llm = False
         if rule and rule.llms:
             needs_llm = True
-        elif rule and 'llm.' in rule.condition.lower():
+        elif rule and not rule.decision and 'llm.' in rule.condition.lower():
             needs_llm = True
         
         # Only initialize semantic evaluator if needed
@@ -159,6 +167,11 @@ class NovaMatcher:
             rule: The new NovaRule to match against
         """
         self.rule = rule
+        if rule and rule.decision and self.decision_config is None:
+            from nova.evaluators.decision.config import DecisionConfig
+            from nova.evaluators.decision.factory import create_decision_evaluator
+            self.decision_config = DecisionConfig.resolve(self._decision_options)
+            self.decision_evaluator = self.decision_evaluator if self.decision_evaluator is not None else create_decision_evaluator(self.decision_config)
         self._precompile_patterns()
         # Update cached condition analysis for new rule
         if rule:
@@ -242,7 +255,7 @@ class NovaMatcher:
         
         return needed_patterns
         
-    def check_prompt(self, prompt: str, skip_llm: bool = False) -> Dict[str, Any]:
+    def check_prompt(self, prompt: str, skip_llm: bool = False, *, decision_state=None, skip_decision=False) -> Dict[str, Any]:
         """
         Check if a prompt matches the rule.
 
@@ -256,6 +269,16 @@ class NovaMatcher:
         Returns:
             Dictionary containing match results and details
         """
+        if self.rule.decision:
+            from nova.evaluators.decision.engine import collect
+            from nova.core.decision import NovaEvaluationError
+            results, causes = collect([self.rule], {self.rule.name: self}, prompt, prompt,
+                                      context=decision_state, skip_llm=skip_llm, skip_decision=skip_decision, parallel=False)
+            result = results[0][1]
+            if causes:
+                raise NovaEvaluationError(result, causes)
+            return result
+
         # Use cached condition analysis (pre-computed at initialization)
         condition = self.rule.condition
         needed_patterns = self._cached_needed_patterns or self._analyze_condition(condition)

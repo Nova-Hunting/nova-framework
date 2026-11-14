@@ -10,7 +10,7 @@ Description: Multi-rule .nov file parser
 from typing import List, Set
 
 from nova.core.rules import NovaRule
-from nova.core.parser import NovaParser, NovaParserError, RULE_START_PATTERN
+from nova.core.parser import NovaParser, NovaParserError
 
 
 class NovaRuleFileParser:
@@ -101,69 +101,8 @@ class NovaRuleFileParser:
         Returns:
             List of strings, each containing a single rule
         """
-        # Find all potential rule declarations using our precompiled pattern
-        rule_matches = list(RULE_START_PATTERN.finditer(content))
-
-        if not rule_matches:
-            return []
-
-        # Extract each rule block with a single pass
-        rule_blocks = []
-
-        # Process all rule declarations
-        for i, match in enumerate(rule_matches):
-            start_pos = match.start()
-
-            # Find the end of this rule (either next rule start or EOF)
-            if i < len(rule_matches) - 1:
-                end_pos = rule_matches[i+1].start()
-            else:
-                end_pos = len(content)
-
-            # Extract the rule text
-            rule_text = content[start_pos:end_pos].strip()
-
-            # Verify rule completeness (has balanced braces)
-            # We use a faster, single-pass algorithm that tracks quote state
-            # to avoid counting braces inside quoted strings
-            brace_count = 0
-            rule_end_pos = -1
-            in_quotes = False
-            escape_next = False
-
-            for pos, char in enumerate(rule_text):
-                if escape_next:
-                    # Previous char was backslash, skip this char
-                    escape_next = False
-                    continue
-
-                if char == '\\':
-                    # Next char is escaped
-                    escape_next = True
-                    continue
-
-                if char == '"':
-                    # Toggle quote state
-                    in_quotes = not in_quotes
-                    continue
-
-                # Only count braces when not inside quotes
-                if not in_quotes:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            # Found complete rule
-                            rule_end_pos = pos + 1
-                            break
-
-            if rule_end_pos > 0:
-                # If we found a valid end, make sure we only include the complete rule
-                rule_blocks.append(rule_text[:rule_end_pos].strip())
-            else:
-                # If braces aren't balanced, use the whole text up to next rule
-                # This maintains backward compatibility with original behavior
-                rule_blocks.append(rule_text)
-
-        return rule_blocks
+        from nova.core.structure import rule_spans
+        try:
+            return [content[start:end] for start, end in rule_spans(content)]
+        except ValueError as error:
+            raise NovaParserError(str(error)) from error

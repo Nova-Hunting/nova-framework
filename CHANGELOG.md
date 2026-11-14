@@ -1,5 +1,21 @@
 # NOVA Framework Changelog
 
+## [Unreleased]
+
+### Security
+- Raised `sentence-transformers` to `~=5.6.0` to exclude versions affected by PYSEC-2026-4164 (CVE-2026-68770).
+
+### Added
+- Decision model questions (`noul`, `choice`, and `score`) under `llm:` through OpenRouter Decisions or Ollama, alongside fully supported quoted LLM checks.
+- Explicit typed-model activation, provider/model configuration, and caller-supplied context through the CLI and SDK.
+- Native typed answers and diagnostics, including probabilities and confidence when supplied. Required unresolved checks raise `NovaEvaluationError` instead of becoming nonmatches.
+
+### Changed
+- Rule parsing supports nested typed declarations while preserving existing quoted LLM syntax and temperature semantics.
+
+### Fixed
+- `@nova.protect()` scans default argument values and bound-method arguments, applies rules added after decoration, and respects `skip_decision`.
+
 ## [0.3.1] - 2026-09-21
 
 ### Security

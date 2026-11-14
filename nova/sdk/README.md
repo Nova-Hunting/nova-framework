@@ -158,6 +158,10 @@ else:
 
 ### Method 2: Decorator Pattern (Recommended)
 
+`protect` scans the named argument, including its default value, against the rules
+loaded at call time. Set `param_name` when the argument is not named `prompt`. A
+missing or non-string scan argument raises `NovaEvaluationError` before execution.
+
 ```python
 from nova.sdk import Nova, NovaBlockedError
 
@@ -340,3 +344,22 @@ pytest tests/test_sdk.py -v
 # Run specific test
 pytest tests/test_sdk.py::TestNovaPolicy -v
 ```
+
+## Optional Decision evaluation
+
+Ollama uses the same rules and results through its `/v1/systemone` endpoint. Pass
+`decision_config={"enabled": True, "provider": "ollama", "model": "nimble"}`.
+Set `host` in that configuration or `OLLAMA_HOST` to select your server. No Ollama
+Python SDK or local ML dependency is needed. See the
+[Ollama provider guide](../../docs/decision.md#ollama-provider).
+
+Pass `decision_config={"enabled": True}` to `Nova` to enable OpenRouter Decisions, and
+pass explicit context with `scan(text, decision_state=context)`. `scan_async` supports
+the same options. `skip_llm=True` skips all LLM checks, including typed questions;
+`skip_decision=True` skips only typed questions.
+
+Inspect `result.decision_results` for all typed answers and `result.decision_batches` for
+request metadata. Catch `NovaEvaluationError` for unresolved required checks;
+its `partial_result` preserves definite findings but cannot report allowed or
+clean. Protection decorators accept `decision_state_factory` and never execute after
+an unresolved required check. See the [full guide](../../docs/decision.md).

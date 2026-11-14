@@ -8,7 +8,6 @@ import functools
 import asyncio
 import time
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Union, Callable, Any
 from pathlib import Path
@@ -26,7 +25,7 @@ from nova.utils.helpers import normalize_unicode
 from .policy import NovaPolicy, Action
 from .result import ScanResult, RuleMatch
 from .redaction import Redactor
-from .exceptions import NovaBlockedError, NovaConfigError
+from .exceptions import NovaConfigError
 
 
 class Nova:
@@ -78,6 +77,7 @@ class Nova:
         on_flag: Optional[Callable[["ScanResult"], Any]] = None,
         ignore_invalid_rules: bool = False,
         debug: bool = False,
+        *, decision_config=None, decision_evaluator=None,
     ):
         """
         Initialize Nova SDK.
@@ -98,6 +98,8 @@ class Nova:
         """
         init_start = time.perf_counter()
 
+        self._decision_options = decision_config
+        self._decision_evaluator = decision_evaluator
         self._rules: List[NovaRule] = []
         self._rule_sources: Dict[str, str] = {}  # rule_name → source file path
         self._debug = debug
@@ -169,26 +171,18 @@ class Nova:
             self._handle_rule_load_error(path, f"could not read file: {e}", e)
             return
 
-        # Check if file contains multiple rules
-        rule_count = len(re.findall(r'^\s*rule\s+\w+\s*{?', content, flags=re.MULTILINE))
         loaded_before = len(self._rules)
-        if rule_count > 1:
-            # Parse multiple rules - split by 'rule ' keyword
+        try:
             rule_blocks = self._split_rule_blocks(content)
-            for index, block in enumerate(rule_blocks, start=1):
-                if block.strip():
-                    try:
-                        rule = parser.parse(block)
-                        self._append_rule(rule, path)
-                    except Exception as e:
-                        self._handle_rule_load_error(path, f"rule block #{index} failed to parse: {e}", e)
-        else:
-            # Single rule
+        except Exception as error:
+            self._handle_rule_load_error(path, f"failed to read rule boundaries: {error}", error)
+            return
+        for index, block in enumerate(rule_blocks, start=1):
             try:
-                rule = parser.parse(content)
+                rule = parser.parse(block)
                 self._append_rule(rule, path)
-            except Exception as e:
-                self._handle_rule_load_error(path, f"failed to parse rule: {e}", e)
+            except Exception as error:
+                self._handle_rule_load_error(path, f"rule block #{index} failed to parse: {error}", error)
 
         if len(self._rules) == loaded_before and not self._ignore_invalid_rules:
             raise NovaConfigError(f"No valid rules loaded from {path}")
@@ -209,10 +203,8 @@ class Nova:
 
     def _split_rule_blocks(self, content: str) -> List[str]:
         """Split content into individual rule blocks."""
-        # Split on 'rule' keyword at start of line or after newline
-        pattern = r'(?=^\s*rule\s+\w+)'
-        blocks = re.split(pattern, content, flags=re.IGNORECASE | re.MULTILINE)
-        return [b for b in blocks if b.strip()]
+        from nova.core.rule_file import NovaRuleFileParser
+        return NovaRuleFileParser()._extract_rule_blocks_optimized(content)
 
     def _initialize_evaluators(self) -> None:
         """Initialize shared evaluators (semantic, LLM) - load once, share across all matchers."""
@@ -274,7 +266,7 @@ class Nova:
         """Check if a rule requires LLM evaluation."""
         if rule.llms:
             return True
-        if rule.condition and 'llm.' in rule.condition.lower():
+        if not rule.decision and rule.condition and 'llm.' in rule.condition.lower():
             return True
         return False
 
@@ -314,16 +306,20 @@ class Nova:
 
     def _initialize_matchers(self) -> None:
         """Create matchers for all rules, sharing evaluators."""
+        if any(rule.decision for rule in self._rules) and self._decision_evaluator is None:
+            from nova.evaluators.decision.factory import create_decision_evaluator
+            self._decision_evaluator = create_decision_evaluator(self._decision_options)
         for rule in self._rules:
             self._matchers[rule.name] = NovaMatcher(
                 rule=rule,
                 semantic_evaluator=self._semantic_evaluator,  # Share semantic evaluator
                 llm_evaluator=self._llm_evaluator,
-                create_llm_evaluator=False  # Don't create new evaluators
+                create_llm_evaluator=False,  # Don't create new evaluators
+                decision_config=self._decision_options, decision_evaluator=self._decision_evaluator
             )
 
     def scan(self, text: str, debug: Optional[bool] = None, parallel: bool = True,
-             skip_llm: bool = False) -> ScanResult:
+             skip_llm: bool = False, *, decision_state=None, skip_decision=False) -> ScanResult:
         """
         Scan text against all loaded rules.
 
@@ -352,128 +348,151 @@ class Nova:
         scan_warnings: List[str] = []
         rule_warnings: Dict[str, List[str]] = {}
 
-        # Identify rules that have LLM patterns
-        rules_with_llm = set()
-        for rule in self._rules:
-            if rule.llms or (rule.condition and 'llm.' in rule.condition.lower()):
-                rules_with_llm.add(rule.name)
+        causes = []
+        if any(rule.decision for rule in self._rules):
+            from nova.evaluators.decision.engine import collect
+            from nova.core.decision import NovaEvaluationError
+            rules_with_llm = {rule.name for rule in self._rules if rule.llms or rule.decision}
+            early_block, skipped_llm_count = False, 0
 
-        # PHASE 1: Fast evaluation (keywords + semantics only, no LLM)
-        # Create temporary matchers without LLM evaluation for the first pass
-        fast_results = []
-        early_block = False
-        skipped_llm_count = 0
+            def stop_on_match(rule):
+                nonlocal early_block, skipped_llm_count
+                if self._policy.get_action_for_match(rule.name, rule.meta).action == Action.BLOCK:
+                    early_block = True
+                    skipped_llm_count = len(rules_with_llm)
+                    return True
+                return False
 
-        for rule in self._rules:
-            matcher = self._matchers.get(rule.name)
-            if not matcher:
-                continue
+            try:
+                results, causes = collect(self._rules, self._matchers, text, scan_text, context=decision_state,
+                                          skip_llm=skip_llm, skip_decision=skip_decision, parallel=parallel,
+                                          stop_on_match=stop_on_match)
+            except NovaEvaluationError as error:
+                partial = ScanResult(text, text, evaluation_complete=False)
+                raise NovaEvaluationError(partial, error.causes) from None
+        else:
+            # Identify rules that have LLM patterns
+            rules_with_llm = set()
+            for rule in self._rules:
+                if rule.llms or (rule.condition and 'llm.' in rule.condition.lower()):
+                    rules_with_llm.add(rule.name)
 
-            # For rules with LLM, check if keywords/semantics alone can satisfy the condition
-            if rule.name in rules_with_llm:
-                result = matcher.check_prompt(scan_text, skip_llm=True)
+            # PHASE 1: Fast evaluation (keywords + semantics only, no LLM)
+            # Create temporary matchers without LLM evaluation for the first pass
+            fast_results = []
+            early_block = False
+            skipped_llm_count = 0
 
-                if result.get('matched', False):
-                    # Rule matched without needing LLM - great!
-                    fast_results.append((rule, result))
-                    rule_meta = result.get("meta", {})
-                    policy_rule = self._policy.get_action_for_match(result["rule_name"], rule_meta)
-                    if policy_rule.action == Action.BLOCK:
-                        early_block = True
-                else:
-                    # Rule didn't match yet - may need LLM evaluation later
-                    fast_results.append((rule, result))
-            else:
-                # No LLM patterns - full evaluation is fast
-                result = matcher.check_prompt(scan_text)
-                if result:
-                    fast_results.append((rule, result))
+            for rule in self._rules:
+                matcher = self._matchers.get(rule.name)
+                if not matcher:
+                    continue
+
+                # For rules with LLM, check if keywords/semantics alone can satisfy the condition
+                if rule.name in rules_with_llm:
+                    result = matcher.check_prompt(scan_text, skip_llm=True)
+
                     if result.get('matched', False):
+                        # Rule matched without needing LLM - great!
+                        fast_results.append((rule, result))
                         rule_meta = result.get("meta", {})
                         policy_rule = self._policy.get_action_for_match(result["rule_name"], rule_meta)
                         if policy_rule.action == Action.BLOCK:
                             early_block = True
-
-        # PHASE 2: LLM evaluation (only if no BLOCK found and not skipped)
-        results = []
-        if early_block or skip_llm:
-            # Skip all LLM evaluation - we already have a BLOCK or user requested skip
-            skipped_llm_count = len(rules_with_llm)
-            results = fast_results
-        else:
-            # Need to run LLM evaluation for rules that require it AND where LLM could change outcome
-            rules_needing_llm = []
-            for rule, result in fast_results:
-                if rule.name in rules_with_llm and not result.get('matched', False):
-                    # Use smart condition analysis to determine if LLM could change the outcome
-                    debug_info = result.get('debug', {})
-                    keyword_matches = debug_info.get('all_keyword_matches', {})
-                    semantic_matches = debug_info.get('all_semantic_matches', {})
-
-                    if can_llm_change_outcome(rule.condition, keyword_matches, semantic_matches):
-                        rules_needing_llm.append(rule)
                     else:
-                        # LLM can't change outcome - skip it
-                        skipped_llm_count += 1
-                        results.append((rule, result))
+                        # Rule didn't match yet - may need LLM evaluation later
+                        fast_results.append((rule, result))
                 else:
-                    results.append((rule, result))
-
-            # Helper to evaluate a single rule with LLM
-            def build_llm_worker_failure(rule, error: Exception):
-                warning = (
-                    f"Rule '{rule.name}' failed closed because SDK LLM evaluation errored: {error}"
-                )
-                return {
-                    "matched": False,
-                    "rule_name": rule.name,
-                    "meta": rule.meta,
-                    "matching_keywords": {},
-                    "matching_semantics": {},
-                    "matching_llm": {},
-                    "semantic_scores": {},
-                    "llm_scores": {},
-                    "debug": {
-                        "condition": rule.condition,
-                        "condition_result": False,
-                        "evaluation_warnings": [warning],
-                        "all_keyword_matches": {},
-                        "all_semantic_matches": {},
-                        "all_llm_matches": {},
-                        "all_llm_details": {},
-                    },
-                }
-
-            def evaluate_rule_with_llm(rule):
-                matcher = self._matchers.get(rule.name)
-                if not matcher:
-                    return build_llm_worker_failure(rule, RuntimeError("matcher not found"))
-                try:
-                    return matcher.check_prompt(scan_text)
-                except Exception as e:
-                    return build_llm_worker_failure(rule, e)
-
-            # Process LLM rules in parallel if enabled and there are multiple
-            if parallel and len(rules_needing_llm) > 1:
-                max_workers = min(len(rules_needing_llm), 10)
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_rule = {
-                        executor.submit(evaluate_rule_with_llm, rule): rule
-                        for rule in rules_needing_llm
-                    }
-                    for future in as_completed(future_to_rule):
-                        rule = future_to_rule[future]
-                        try:
-                            result = future.result()
-                            if result:
-                                results.append((rule, result))
-                        except Exception as e:
-                            results.append((rule, build_llm_worker_failure(rule, e)))
-            else:
-                for rule in rules_needing_llm:
-                    result = evaluate_rule_with_llm(rule)
+                    # No LLM patterns - full evaluation is fast
+                    result = matcher.check_prompt(scan_text)
                     if result:
+                        fast_results.append((rule, result))
+                        if result.get('matched', False):
+                            rule_meta = result.get("meta", {})
+                            policy_rule = self._policy.get_action_for_match(result["rule_name"], rule_meta)
+                            if policy_rule.action == Action.BLOCK:
+                                early_block = True
+
+            # PHASE 2: LLM evaluation (only if no BLOCK found and not skipped)
+            results = []
+            if early_block or skip_llm:
+                # Skip all LLM evaluation - we already have a BLOCK or user requested skip
+                skipped_llm_count = len(rules_with_llm)
+                results = fast_results
+            else:
+                # Need to run LLM evaluation for rules that require it AND where LLM could change outcome
+                rules_needing_llm = []
+                for rule, result in fast_results:
+                    if rule.name in rules_with_llm and not result.get('matched', False):
+                        # Use smart condition analysis to determine if LLM could change the outcome
+                        debug_info = result.get('debug', {})
+                        keyword_matches = debug_info.get('all_keyword_matches', {})
+                        semantic_matches = debug_info.get('all_semantic_matches', {})
+
+                        if can_llm_change_outcome(rule.condition, keyword_matches, semantic_matches):
+                            rules_needing_llm.append(rule)
+                        else:
+                            # LLM can't change outcome - skip it
+                            skipped_llm_count += 1
+                            results.append((rule, result))
+                    else:
                         results.append((rule, result))
+
+                # Helper to evaluate a single rule with LLM
+                def build_llm_worker_failure(rule, error: Exception):
+                    warning = (
+                        f"Rule '{rule.name}' failed closed because SDK LLM evaluation errored: {error}"
+                    )
+                    return {
+                        "matched": False,
+                        "rule_name": rule.name,
+                        "meta": rule.meta,
+                        "matching_keywords": {},
+                        "matching_semantics": {},
+                        "matching_llm": {},
+                        "semantic_scores": {},
+                        "llm_scores": {},
+                        "debug": {
+                            "condition": rule.condition,
+                            "condition_result": False,
+                            "evaluation_warnings": [warning],
+                            "all_keyword_matches": {},
+                            "all_semantic_matches": {},
+                            "all_llm_matches": {},
+                            "all_llm_details": {},
+                        },
+                    }
+
+                def evaluate_rule_with_llm(rule):
+                    matcher = self._matchers.get(rule.name)
+                    if not matcher:
+                        return build_llm_worker_failure(rule, RuntimeError("matcher not found"))
+                    try:
+                        return matcher.check_prompt(scan_text)
+                    except Exception as e:
+                        return build_llm_worker_failure(rule, e)
+
+                # Process LLM rules in parallel if enabled and there are multiple
+                if parallel and len(rules_needing_llm) > 1:
+                    max_workers = min(len(rules_needing_llm), 10)
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_to_rule = {
+                            executor.submit(evaluate_rule_with_llm, rule): rule
+                            for rule in rules_needing_llm
+                        }
+                        for future in as_completed(future_to_rule):
+                            rule = future_to_rule[future]
+                            try:
+                                result = future.result()
+                                if result:
+                                    results.append((rule, result))
+                            except Exception as e:
+                                results.append((rule, build_llm_worker_failure(rule, e)))
+                else:
+                    for rule in rules_needing_llm:
+                        result = evaluate_rule_with_llm(rule)
+                        if result:
+                            results.append((rule, result))
 
         # Process all results
         for rule, result in results:
@@ -512,6 +531,7 @@ class Nova:
                 semantic_scores=result.get("semantic_scores", {}),
                 llm_scores=result.get("llm_scores", {}),
                 matched_patterns=matched_patterns,
+                matching_decision=result.get("matching_decision", {}),
             )
             matches.append(match)
 
@@ -538,7 +558,10 @@ class Nova:
             matches=matches,
             redactions=all_redactions,
             warnings=scan_warnings,
-            rule_warnings=rule_warnings
+            rule_warnings=rule_warnings,
+            decision_results={rule.name: result["decision_results"] for rule, result in results if rule.decision},
+            decision_batches={rule.name: result.get("decision_batches", []) for rule, result in results if rule.decision},
+            evaluation_complete=not causes,
         )
 
         # Execute global callbacks
@@ -562,9 +585,12 @@ class Nova:
                 skip_reason = ""
             self._print_debug(text, scan_result, scan_elapsed_ms, fast_count, llm_count, skipped_llm_count, skip_reason)
 
+        if causes:
+            from nova.core.decision import NovaEvaluationError
+            raise NovaEvaluationError(scan_result, causes)
         return scan_result
 
-    async def scan_async(self, text: str) -> ScanResult:
+    async def scan_async(self, text: str, *, decision_state=None, skip_decision=False, skip_llm=False) -> ScanResult:
         """
         Async version of scan.
 
@@ -577,7 +603,7 @@ class Nova:
             ScanResult with all match details and actions
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.scan, text)
+        return await loop.run_in_executor(None, functools.partial(self.scan, text, decision_state=decision_state, skip_decision=skip_decision, skip_llm=skip_llm))
 
     def protect(
         self,
@@ -587,6 +613,7 @@ class Nova:
         on_block: Optional[Callable] = None,
         raise_on_block: bool = True,
         skip_llm: bool = False,
+        *, decision_state_factory=None, skip_decision=False,
     ):
         """
         Decorator to protect a function with Nova scanning.
@@ -594,7 +621,7 @@ class Nova:
         Args:
             action: Action to take on match (can override policy)
             severity: Minimum severity to trigger action
-            param_name: Name of the parameter to scan
+            param_name: Name of the parameter to scan, including its default value
             on_block: Custom handler when blocked
             raise_on_block: Whether to raise NovaBlockedError
             skip_llm: Skip LLM evaluations for faster scanning (default False)
@@ -616,75 +643,9 @@ class Nova:
             action = Action(action)
 
         def decorator(func: Callable) -> Callable:
-            @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
-                # Extract text to scan
-                text = kwargs.get(param_name)
-                if text is None and args:
-                    text = args[0]
-
-                if text is None:
-                    return func(*args, **kwargs)
-
-                # Scan the text
-                result = self.scan(text, skip_llm=skip_llm)
-
-                # Check if we should block
-                should_block = self._should_block(result, action, severity)
-
-                if should_block:
-                    if on_block:
-                        return on_block(result)
-                    if raise_on_block:
-                        raise NovaBlockedError(result)
-                    return None
-
-                # Use sanitized text if redaction occurred
-                if result.redacted:
-                    if param_name in kwargs:
-                        kwargs[param_name] = result.sanitized_text
-                    elif args:
-                        args = (result.sanitized_text,) + args[1:]
-
-                return func(*args, **kwargs)
-
-            @functools.wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                # Extract text to scan
-                text = kwargs.get(param_name)
-                if text is None and args:
-                    text = args[0]
-
-                if text is None:
-                    return await func(*args, **kwargs)
-
-                # Scan the text (run sync scan in executor with skip_llm)
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, lambda: self.scan(text, skip_llm=skip_llm))
-
-                # Check if we should block
-                should_block = self._should_block(result, action, severity)
-
-                if should_block:
-                    if on_block:
-                        return on_block(result)
-                    if raise_on_block:
-                        raise NovaBlockedError(result)
-                    return None
-
-                # Use sanitized text
-                if result.redacted:
-                    if param_name in kwargs:
-                        kwargs[param_name] = result.sanitized_text
-                    elif args:
-                        args = (result.sanitized_text,) + args[1:]
-
-                return await func(*args, **kwargs)
-
-            # Return appropriate wrapper based on function type
-            if asyncio.iscoroutinefunction(func):
-                return async_wrapper
-            return sync_wrapper
+            from nova.sdk.decision_protection import protect_decision
+            return protect_decision(self, func, action, severity, param_name, on_block, raise_on_block,
+                                    skip_llm, skip_decision, decision_state_factory)
 
         return decorator
 
@@ -824,12 +785,16 @@ class Nova:
         if self._rule_needs_llm(rule) and self._llm_evaluator is None:
             self._llm_evaluator = self._create_configured_llm_evaluator()
 
+        if rule.decision and self._decision_evaluator is None:
+            from nova.evaluators.decision.factory import create_decision_evaluator
+            self._decision_evaluator = create_decision_evaluator(self._decision_options)
         self._rules.append(rule)
         self._matchers[rule.name] = NovaMatcher(
             rule=rule,
             semantic_evaluator=self._semantic_evaluator,  # Share the semantic evaluator
             llm_evaluator=self._llm_evaluator,
-            create_llm_evaluator=False
+            create_llm_evaluator=False,
+            decision_config=self._decision_options, decision_evaluator=self._decision_evaluator
         )
 
     def add_policy_rule(self, pattern: str, config: Dict) -> None:

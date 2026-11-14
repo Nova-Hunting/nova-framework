@@ -9,6 +9,7 @@ Description: Rule definitions and pattern classes for pattern matching
 
 from dataclasses import dataclass, field
 from typing import Dict
+from nova.core.decision import DecisionPattern
 
 
 @dataclass
@@ -46,10 +47,10 @@ class LLMPattern:
     
     Attributes:
         pattern: The prompt template for LLM evaluation
-        threshold: The minimum confidence score to consider a match (0.0 to 1.0)
+        threshold: Model temperature (0.0 to 1.0); the field name is retained for compatibility
     """
     pattern: str
-    threshold: float = 0.1  # Default confidence threshold
+    threshold: float = 0.1  # Default model temperature
 
 
 @dataclass
@@ -71,3 +72,5 @@ class NovaRule:
     semantics: Dict[str, SemanticPattern] = field(default_factory=dict)
     llms: Dict[str, LLMPattern] = field(default_factory=dict)
     condition: str = ""
+    # Decision model questions under llm: use a separate evaluator internally.
+    decision: Dict[str, DecisionPattern] = field(default_factory=dict)

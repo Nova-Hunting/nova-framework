@@ -62,5 +62,5 @@ For OpenRouter, a minimal smoke test should exercise Nova's evaluator path with 
 - Run new rules in observe mode before blocking user traffic.
 - Track false positives, false negatives, provider errors, and latency by rule and provider.
 - Keep keyword-only coverage for high-confidence detections that should not depend on remote providers.
-- Treat provider outages and rate limits as explicit policy decisions: block, degrade to keyword-only checks, or queue for later review.
+- Treat provider outages and rate limits as explicit policy decision: block, degrade to keyword-only checks, or queue for later review.
 - Re-run the full gate set after dependency updates, model changes, or rule-pack changes.

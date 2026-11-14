@@ -33,6 +33,12 @@ SDIST_REQUIRED_FILES = {
     "scripts/check_secrets.py",
     "scripts/smoke_wheel.py",
     "scripts/verify_artifacts.py",
+    "docs/decision.md",
+    "docs/design/decision-section.md",
+    "tests/test_decision_parser.py",
+    "tests/test_decision_integration.py",
+    "tests/test_ollama_decision.py",
+    "tests/test_ollama_decision_live.py",
     "tests/test_cli.py",
     "tests/test_condition.py",
     "tests/test_issue_22.py",
@@ -45,12 +51,24 @@ SDIST_REQUIRED_FILES = {
     "tests/test_static_security.py",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
+    "nova/core/decision.py",
+    "nova/evaluators/decision/openrouter.py",
+    "nova/evaluators/decision/factory.py",
+    "nova/evaluators/decision/http.py",
+    "nova/evaluators/decision/ollama.py",
+    "nova/sdk/decision_protection.py",
 }
 
 WHEEL_REQUIRED_FILES = {
     "nova/sdk/README.md",
     "nova/_version.py",
     "nova/utils/log_buffer.py",
+    "nova/core/decision.py",
+    "nova/evaluators/decision/openrouter.py",
+    "nova/evaluators/decision/factory.py",
+    "nova/evaluators/decision/http.py",
+    "nova/evaluators/decision/ollama.py",
+    "nova/sdk/decision_protection.py",
 }
 
 REQUIRED_PROJECT_URL_LABELS = {
@@ -111,6 +129,14 @@ def main() -> None:
 
     require_subset(SDIST_REQUIRED_FILES, normalized_sdist_names(sdist, version), sdist)
     require_subset(WHEEL_REQUIRED_FILES, wheel_names(wheel), wheel)
+
+    for artifact, names in (
+        (sdist, normalized_sdist_names(sdist, version)),
+        (wheel, wheel_names(wheel)),
+    ):
+        stale = sorted(name for name in names if name.startswith("nova/") and any(old in name for old in ("jev", "sys1", "decision/laya.py", "decision/models.py")))
+        if stale:
+            raise SystemExit(f"{artifact} contains obsolete decision module paths: {stale}")
 
     metadata = wheel_metadata(wheel, version)
     for label in REQUIRED_PROJECT_URL_LABELS:

@@ -22,7 +22,7 @@ from colorama import Fore, Back
 
 # Import Nova components
 try:
-    from nova.core.parser import NovaParser, NovaRuleFileParser
+    from nova.core.parser import NovaParser, NovaRuleFileParser, NovaParserError
     from nova.core.matcher import NovaMatcher
     from nova.utils.config import get_config
     from nova.evaluators.llm import get_validated_evaluator
@@ -520,6 +520,80 @@ def print_prompts_summary(results: List[Dict[str, Any]], prompts: List[str]):
         print(f"{Fore.WHITE}{i+1:<4} {result_text:<27} {Fore.YELLOW}{display_prompt}")
 
 
+def run_decision_cli(args, parser, blocks, prompts):
+    """Use the shared scanner for Decision rules, preserving legacy CLI output elsewhere."""
+    import json
+    import time
+    from nova.core.scanner import NovaScanner
+    from nova.core.decision import NovaEvaluationError
+    from nova.evaluators.decision.config import DecisionConfig
+    from nova.evaluators.decision.state import snapshot_state
+
+    options = {}
+    if args.decision_enabled is not None:
+        options["enabled"] = args.decision_enabled
+    if args.decision_model is not None:
+        options["model"] = args.decision_model
+    if args.decision_provider is not None:
+        options["provider"] = args.decision_provider
+    if args.decision_host is not None:
+        options["host"] = args.decision_host
+    try:
+        config = DecisionConfig.resolve(options)
+        rules = [NovaParser().parse(block) for block in (blocks[:1] if args.single else blocks)]
+        context = None
+        if args.decision_state:
+            with open(args.decision_state, encoding="utf-8") as stream:
+                payload = stream.read(config.max_request_bytes + 1)
+            if len(payload.encode("utf-8")) > config.max_request_bytes:
+                raise ValueError("Decision context exceeds request size limit")
+            context = json.loads(payload)
+            snapshot_state("", context, config.max_request_bytes)
+        scanner = NovaScanner(rules, llm_type=args.llm, llm_model=args.model, decision_config=config)
+    except (ValueError, OSError, NovaParserError) as error:
+        parser.error(str(error))
+    incomplete = False
+    for index, prompt in enumerate(prompts):
+        started = time.perf_counter()
+        causes = []
+        try:
+            details = scanner.scan_with_details(prompt, decision_state=context)
+        except NovaEvaluationError as error:
+            details = error.partial_result
+            incomplete = True
+            causes = error.causes
+        # No prompt/context or credentials in default output. Evidence remains inspectable.
+        output = {"prompt_index": index, "evaluation_complete": details.get("evaluation_complete", False),
+                  "matches": details.get("matches", []), "decision_results": details.get("decision_results", {})}
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if causes:
+            output["errors"] = sorted(set(causes))
+        if args.verbose:
+            output["elapsed_ms"] = round(elapsed_ms, 3)
+            output["decision_config"] = {"enabled": config.enabled, "provider": config.provider, "model": config.model}
+            output["rule_details"] = {}
+            for name, result in details.get("detailed_results", {}).items():
+                debug = result.get("debug", {})
+                output["rule_details"][name] = {
+                    "matched": result["matched"],
+                    "condition": debug.get("condition"),
+                    "condition_result": debug.get("condition_result"),
+                    "matching_keywords": result.get("matching_keywords", {}),
+                    "matching_semantics": result.get("matching_semantics", {}),
+                    "matching_llm": result.get("matching_llm", {}),
+                    "matching_decision": result.get("matching_decision", {}),
+                    "evaluation_warnings": debug.get("evaluation_warnings", []),
+                    "decision_batches": result.get("decision_batches", []),
+                }
+        if args.json:
+            print(json.dumps(output, ensure_ascii=False))
+        else:
+            from nova.utils.decision_output import format_decision_output
+            print(format_decision_output(details, index, elapsed_ms, config, args.verbose, causes))
+    if incomplete:
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the novarun tool."""
     parser = argparse.ArgumentParser(
@@ -543,6 +617,16 @@ def main():
     # Keep the -a/--all flag for backward compatibility, but make it a no-op (all rules is now default)
     parser.add_argument('-a', '--all', action='store_true', help='Check against all rules in the file (default behavior)')
     
+    decision_group = parser.add_mutually_exclusive_group()
+    decision_group.add_argument('--decision', dest='decision_enabled', action='store_true', default=None,
+                           help='Enable Decision decision using the selected provider')
+    decision_group.add_argument('--skip-decision', dest='decision_enabled', action='store_false',
+                           help='Disable Decision; unresolved required checks are errors')
+    parser.add_argument('--decision-provider', choices=('openrouter', 'ollama'), help='Decision provider (default: openrouter)')
+    parser.add_argument('--decision-model', help='OpenRouter model ID or Ollama decision model name')
+    parser.add_argument('--decision-host', help='Ollama server URL (default: OLLAMA_HOST or http://localhost:11434)')
+    parser.add_argument('--decision-state', metavar='FILE', help='JSON context for Decision; paired with each prompt')
+    parser.add_argument('--json', action='store_true', help='Emit Decision results as JSON Lines instead of a readable summary')
     args = parser.parse_args()
     
     try:
@@ -565,10 +649,25 @@ def main():
         if not prompts:
             print(f"{Fore.RED}No valid prompts found in {args.file}")
             sys.exit(1)
-        print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
+        if not args.json:
+            print(f"\n{Fore.CYAN}Loaded {Fore.WHITE}{len(prompts)}{Fore.CYAN} prompts from {Fore.WHITE}{args.file}")
     
     # Check if the file contains multiple rules using the shared rule-file extractor.
-    rule_blocks = extract_rules(file_content)
+    try:
+        rule_blocks = extract_rules(file_content)
+    except NovaParserError as e:
+        print(f"{Fore.RED}Error parsing rule file: {e}")
+        sys.exit(1)
+    from nova.core.structure import sections
+    from nova.core.decision_parser import has_typed_llm
+    typed_llm = any(
+        has_typed_llm(sections(block)[1].get("llm", ("", 0))[0])
+        for block in rule_blocks
+    )
+    if typed_llm:
+        return run_decision_cli(args, parser, rule_blocks, prompts)
+    if args.json:
+        parser.error("--json currently requires a rule file with typed llm declarations")
     if not args.single and len(rule_blocks) > 1:
         # Extract all rules from the file
         if not rule_blocks:

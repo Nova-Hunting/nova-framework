@@ -75,3 +75,18 @@ When `--config` is passed explicitly, a missing or malformed file fails fast ins
 ## Maintainability Notes
 
 The 2026 cleanup split the two largest modules while preserving import paths: `nova/evaluators/llm.py` became the `nova/evaluators/llm/` package, and `NovaRuleFileParser` moved to `nova/core/rule_file.py` (re-exported from `nova.core.parser`). Remaining larger modules, in case future splits are wanted: `nova/core/parser.py` (~900 lines, single `NovaParser` class — split candidate: move condition-section validation into a helper module) and `nova/sdk/nova.py` (~870 lines — split candidate: extract rule-loading and fast-path scan scheduling). Neither exceeds the 1,000-line threshold today.
+
+## LLM and decision model evaluation
+
+The `llm:` section supports quoted checks evaluated by LLMs and `noul`, `choice`,
+and `score` questions evaluated by decision models. Typed patterns live in `nova/core/decision.py`; their parser shares
+lexical rule boundaries with the existing parser. Conditions use the common
+`llm.$name` namespace.
+
+`nova/evaluators/decision/` batches typed questions through OpenRouter or Ollama,
+validates answers, and projects them into true, false, or unknown predicates. Its
+scan-local engine is shared by the matcher, scanner, and SDK. Required unresolved
+checks raise `NovaEvaluationError`; a definite SDK block in the fast phase skips remaining model calls.
+Rules without typed declarations retain their existing evaluation path.
+
+See the [Decision guide](docs/decision.md) for syntax, configuration, context, and results.

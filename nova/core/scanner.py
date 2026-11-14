@@ -30,6 +30,7 @@ class NovaScanner:
         llm_type: Optional[str] = None,
         llm_model: Optional[str] = None,
         llm_evaluator: Optional[LLMEvaluator] = None,
+        *, decision_config=None, decision_evaluator=None,
     ):
         """
         Initialize the scanner with a list of rules.
@@ -42,6 +43,8 @@ class NovaScanner:
             llm_model: Optional model/deployment override for the selected provider.
             llm_evaluator: Optional pre-built evaluator to reuse for all LLM rules.
         """
+        self._decision_options = decision_config
+        self._decision_evaluator = decision_evaluator
         self.rules = rules or []
         self._matchers = {}
         self._llm_type = llm_type
@@ -97,18 +100,22 @@ class NovaScanner:
         """Check if a rule requires LLM evaluation."""
         if rule.llms:
             return True
-        if rule.condition and 'llm.' in rule.condition.lower():
+        if not rule.decision and rule.condition and 'llm.' in rule.condition.lower():
             return True
         return False
     
     def _create_matcher(self, rule: NovaRule) -> NovaMatcher:
         """Create a matcher for a rule, with shared evaluators."""
+        if rule.decision and self._decision_evaluator is None:
+            from nova.evaluators.decision.factory import create_decision_evaluator
+            self._decision_evaluator = create_decision_evaluator(self._decision_options)
         # Create matcher with shared LLM evaluator if one exists
         matcher = NovaMatcher(
             rule=rule,
             llm_evaluator=self._llm_evaluator,
             # Don't create a new LLM evaluator if we didn't create one already
-            create_llm_evaluator=self._llm_evaluator is None
+            create_llm_evaluator=self._llm_evaluator is None,
+            decision_config=self._decision_options, decision_evaluator=self._decision_evaluator
         )
         self._matchers[rule.name] = matcher
         return matcher
@@ -170,7 +177,7 @@ class NovaScanner:
             self.rules.append(rule)
             self._create_matcher(rule)
     
-    def scan(self, prompt: str) -> List[Dict[str, Any]]:
+    def scan(self, prompt: str, *, decision_state=None, skip_decision=False, skip_llm=False) -> List[Dict[str, Any]]:
         """
         Scan a prompt against all loaded rules.
 
@@ -180,6 +187,9 @@ class NovaScanner:
         Returns:
             List of match results for rules that matched
         """
+        if any(rule.decision for rule in self.rules):
+            details = self.scan_with_details(prompt, decision_state=decision_state, skip_decision=skip_decision, skip_llm=skip_llm)
+            return [result for result in details["detailed_results"].values() if result["matched"]]
         # Normalize Unicode to prevent homoglyph evasion attacks
         prompt = normalize_unicode(prompt)
 
@@ -187,14 +197,14 @@ class NovaScanner:
 
         for rule in self.rules:
             matcher = self._matchers[rule.name]
-            result = matcher.check_prompt(prompt)
+            result = matcher.check_prompt(prompt, skip_llm=skip_llm)
             
             if result['matched']:
                 results.append(result)
         
         return results
     
-    def scan_with_details(self, prompt: str) -> Dict[str, Any]:
+    def scan_with_details(self, prompt: str, *, decision_state=None, skip_decision=False, skip_llm=False) -> Dict[str, Any]:
         """
         Scan a prompt and return detailed results for all rules.
 
@@ -204,6 +214,20 @@ class NovaScanner:
         Returns:
             Dictionary with comprehensive scan results
         """
+        if any(rule.decision for rule in self.rules):
+            from nova.evaluators.decision.engine import collect
+            from nova.core.decision import NovaEvaluationError
+            results, causes = collect(self.rules, self._matchers, prompt, normalize_unicode(prompt),
+                                     context=decision_state, skip_llm=skip_llm, skip_decision=skip_decision)
+            matches = [{"rule_name": rule.name, "meta": rule.meta} for rule, result in results if result["matched"]]
+            details = {"prompt": prompt, "matched_any": bool(matches), "matches": matches,
+                       "match_count": len(matches), "scanned_rules": len(self.rules),
+                       "detailed_results": {rule.name: result for rule, result in results},
+                       "decision_results": {rule.name: result["decision_results"] for rule, result in results if rule.decision},
+                       "evaluation_complete": not causes}
+            if causes:
+                raise NovaEvaluationError(details, causes)
+            return details
         # Normalize Unicode to prevent homoglyph evasion attacks
         prompt = normalize_unicode(prompt)
 
@@ -212,7 +236,7 @@ class NovaScanner:
         
         for rule in self.rules:
             matcher = self._matchers[rule.name]
-            result = matcher.check_prompt(prompt)
+            result = matcher.check_prompt(prompt, skip_llm=skip_llm)
             
             # Add to matches list if matched
             if result['matched']:
